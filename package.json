@@ -1,0 +1,21 @@
+{
+  "name": "ytextractor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Extract audio from YouTube (or a file), separate it into stems with Demucs, and remix in a studio-style browser mixer. Separation and YouTube extraction run in the browser or on an optional Node backend.",
+  "workspaces": [
+    "shared",
+    "web",
+    "server"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w web",
+    "dev:server": "npm run dev -w server",
+    "dev:server:debug": "node --import tsx --inspect server/index.ts",
+    "build": "npm run build -w shared && npm run build -w web",
+    "lint": "npm run lint -w web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

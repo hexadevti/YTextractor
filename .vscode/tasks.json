@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "backend-debug",
+      "type": "shell",
+      "command": "npm run dev:server:debug",
+      "isBackground": true,
+      "options": {
+        "env": {
+          "NODE_OPTIONS": "",
+          "VSCODE_INSPECTOR_OPTIONS": ""
+        }
+      },
+      "problemMatcher": {
+        "pattern": { "regexp": "." },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "listening on"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    }
+  ]
+}

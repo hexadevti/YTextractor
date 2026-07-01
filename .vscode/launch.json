@@ -1,0 +1,55 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach to Backend",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "restart": true,
+      "cwd": "${workspaceFolder}",
+      "skipFiles": ["<node_internals>/**"],
+      "preLaunchTask": "backend-debug"
+    },
+    {
+      "name": "Attach to Backend (no auto-start)",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "restart": true,
+      "cwd": "${workspaceFolder}",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Web (Next.js dev)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev:web",
+      "cwd": "${workspaceFolder}",
+      "env": { "NODE_OPTIONS": "", "VSCODE_INSPECTOR_OPTIONS": "" },
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://localhost:\\d+)",
+        "uriFormat": "%s",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "Backend (launch)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/server/index.ts",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ],
+  "compounds": [
+    {
+      "name": "App (attach backend + run web)",
+      "configurations": ["Attach to Backend", "Web (Next.js dev)"],
+      "stopAll": true
+    }
+  ]
+}
