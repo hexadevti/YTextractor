@@ -192,10 +192,12 @@ export default function Editor({
   const engineRef = useRef<EditorEngine | null>(null);
   const laneHeightRef = useRef(laneHeight);
   const sidebarWidthRef = useRef(sidebarWidth);
+  const viewportWidthRef = useRef(0);
   projectRef.current = project;
   selectionRef.current = selection;
   pxRef.current = pxPerSec;
   scrollRef.current = scrollSec;
+  viewportWidthRef.current = viewportWidth;
   engineRef.current = engine;
   metroOnRef.current = metroOn;
   bpmRef.current = bpm;
@@ -290,6 +292,16 @@ export default function Editor({
     let raf = 0;
     const tick = () => {
       const t = engine.currentTime();
+      // Auto-follow: when zoomed in enough that the playhead would leave the
+      // visible window, page the view forward (or back) so it stays on screen.
+      if (engine.isPlaying && viewportWidthRef.current > 0 && pxRef.current > 0) {
+        const viewportSec = viewportWidthRef.current / pxRef.current;
+        if (t > scrollRef.current + viewportSec || t < scrollRef.current) {
+          const next = Math.max(0, t - viewportSec * 0.1);
+          scrollRef.current = next; // update immediately so this frame draws in place
+          setScrollSec(next);
+        }
+      }
       if (playheadRef.current) {
         const x = sidebarWidthRef.current + (t - scrollRef.current) * pxRef.current;
         playheadRef.current.style.left = `${x}px`;
