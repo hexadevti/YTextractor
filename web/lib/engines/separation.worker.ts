@@ -37,7 +37,6 @@ async function createSession(
   // The WASM fallback disables the arena / mem-pattern / graph optimisation to
   // minimise peak heap use, since the model is large for the 32-bit WASM heap.
   const attempts: { ep: string; options: ort.InferenceSession.SessionOptions }[] = [];
-  // @ts-expect-error navigator.gpu is not in older lib typings
   if (typeof navigator !== 'undefined' && navigator.gpu) {
     attempts.push({ ep: 'webgpu', options: { executionProviders: ['webgpu'] } });
   }

@@ -1,143 +1,245 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  ArrangementSummary,
   JobConfig,
   ProgressUpdate,
   ProjectMeta,
   SourceMeta,
-  StemSet,
 } from '@ytx/shared';
 import StartPanel from '@/components/StartPanel';
 import LibraryPanel from '@/components/LibraryPanel';
+import OptionsPanel from '@/components/OptionsPanel';
 import ProgressPanel from '@/components/ProgressPanel';
-import Mixer from '@/components/Mixer';
+import Editor from '@/components/editor/Editor';
 import { runJob } from '@/lib/pipeline';
 import { separateFromSource } from '@/lib/engines/client';
 import { loadProject } from '@/lib/library';
+import { emptyProject, fromStemSet, type EditorProject } from '@/lib/editor/model';
+import { loadArrangement } from '@/lib/editor/persist';
 import { DEFAULT_BACKEND_URL } from '@/lib/config';
 
-type Stage =
-  | { name: 'config' }
-  | { name: 'running'; progress: ProgressUpdate }
-  | { name: 'ready'; set: StemSet; title: string; persisted: boolean }
-  | { name: 'error'; message: string };
+type View = 'import' | 'library' | 'options';
+const TITLES: Record<View, string> = { import: 'Import', library: 'Library', options: 'Options' };
+
+interface Loaded {
+  project: EditorProject;
+  title: string;
+}
 
 export default function Home() {
-  const [stage, setStage] = useState<Stage>({ name: 'config' });
+  const [modal, setModal] = useState<View | null>('import');
+  const [project, setProject] = useState<EditorProject>(() => emptyProject());
+  const [title, setTitle] = useState('Untitled');
+  const [sessionId, setSessionId] = useState(0);
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [reloadKey, setReloadKey] = useState(0);
+  const [job, setJob] = useState<{ running: boolean; progress?: ProgressUpdate; error?: string }>({
+    running: false,
+  });
   const cancelledRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const [navOpen, setNavOpen] = useState(true);
 
-  const onProgress = useCallback((progress: ProgressUpdate) => {
-    if (!cancelledRef.current) setStage({ name: 'running', progress });
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem('ytx-nav-open');
+      if (v !== null) setNavOpen(v === '1');
+    } catch {
+      /* ignore */
+    }
   }, []);
 
-  const start = useCallback(
-    async (config: JobConfig, file: File | null) => {
-      cancelledRef.current = false;
-      setStage({ name: 'running', progress: { phase: 'extracting', percent: 0 } });
+  const toggleNav = () =>
+    setNavOpen((o) => {
+      const n = !o;
       try {
-        const { set, title, persisted } = await runJob(config, file, onProgress);
-        if (cancelledRef.current) return;
-        setStage({ name: 'ready', set, title, persisted });
-        setReloadKey((k) => k + 1);
-      } catch (err) {
-        if (cancelledRef.current) return;
-        setStage({ name: 'error', message: err instanceof Error ? err.message : String(err) });
+        localStorage.setItem('ytx-nav-open', n ? '1' : '0');
+      } catch {
+        /* ignore */
       }
-    },
-    [onProgress],
-  );
+      return n;
+    });
 
-  const splitSource = useCallback(
-    async (source: SourceMeta) => {
-      cancelledRef.current = false;
-      setStage({ name: 'running', progress: { phase: 'separating', percent: 0 } });
-      try {
-        const set = await separateFromSource(backendUrl, source.id, onProgress);
-        if (cancelledRef.current) return;
-        setStage({ name: 'ready', set, title: source.title, persisted: true });
-        setReloadKey((k) => k + 1);
-      } catch (err) {
-        if (cancelledRef.current) return;
-        setStage({ name: 'error', message: err instanceof Error ? err.message : String(err) });
-      }
-    },
-    [backendUrl, onProgress],
-  );
+  const onProgress = useCallback((progress: ProgressUpdate) => {
+    if (!cancelledRef.current) setJob({ running: true, progress });
+  }, []);
 
-  const openProject = useCallback(
-    async (project: ProjectMeta) => {
-      cancelledRef.current = false;
-      setStage({ name: 'running', progress: { phase: 'loading-model', percent: 0, message: 'Opening project…' } });
-      try {
-        const set = await loadProject(backendUrl, project, onProgress);
-        if (cancelledRef.current) return;
-        setStage({ name: 'ready', set, title: project.title, persisted: true });
-      } catch (err) {
-        if (cancelledRef.current) return;
-        setStage({ name: 'error', message: err instanceof Error ? err.message : String(err) });
-      }
-    },
-    [backendUrl, onProgress],
-  );
-
-  const reset = useCallback(() => {
-    cancelledRef.current = true;
-    setStage({ name: 'config' });
+  const loadIntoEditor = useCallback((loaded: Loaded) => {
+    setProject(loaded.project);
+    setTitle(loaded.title);
+    setSessionId((s) => s + 1);
+    dirtyRef.current = false;
+    setJob({ running: false });
+    setModal(null);
     setReloadKey((k) => k + 1);
   }, []);
 
-  return (
-    <main className="container">
-      <header className="app-header">
-        <span className="logo">🎛 YTextractor</span>
-        <span className="tagline">Stem splitter &amp; studio mixer</span>
-      </header>
+  // Run a project-loading task inside the active modal; on success it replaces
+  // the editor's project (confirming first if there are unsaved edits).
+  const runInModal = useCallback(
+    async (fn: () => Promise<Loaded>) => {
+      if (
+        dirtyRef.current &&
+        !window.confirm('Replace the current project? Unsaved changes will be lost.')
+      ) {
+        return;
+      }
+      cancelledRef.current = false;
+      setJob({ running: true, progress: { phase: 'extracting', percent: 0 } });
+      try {
+        const loaded = await fn();
+        if (cancelledRef.current) return;
+        loadIntoEditor(loaded);
+      } catch (err) {
+        if (cancelledRef.current) return;
+        setJob({ running: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+    [loadIntoEditor],
+  );
 
-      {stage.name === 'config' && (
-        <>
-          <StartPanel onStart={start} backendUrl={backendUrl} onBackendUrlChange={setBackendUrl} />
-          <LibraryPanel
-            backendUrl={backendUrl}
-            onOpenProject={openProject}
-            onSplitSource={splitSource}
-            reloadKey={reloadKey}
-          />
-        </>
-      )}
+  const start = useCallback(
+    (config: JobConfig, file: File | null) =>
+      runInModal(async () => {
+        const { set, title: t } = await runJob(config, file, onProgress);
+        return { project: fromStemSet(set), title: t };
+      }),
+    [runInModal, onProgress],
+  );
 
-      {stage.name === 'running' && <ProgressPanel progress={stage.progress} onCancel={reset} />}
+  const splitSource = useCallback(
+    (source: SourceMeta) =>
+      runInModal(async () => {
+        const set = await separateFromSource(backendUrl, source.id, onProgress);
+        return { project: fromStemSet(set), title: source.title };
+      }),
+    [runInModal, backendUrl, onProgress],
+  );
 
-      {stage.name === 'error' && (
+  const openProject = useCallback(
+    (p: ProjectMeta) =>
+      runInModal(async () => {
+        const set = await loadProject(backendUrl, p, onProgress);
+        return { project: fromStemSet(set), title: p.title };
+      }),
+    [runInModal, backendUrl, onProgress],
+  );
+
+  const openArrangement = useCallback(
+    (a: ArrangementSummary) => runInModal(() => loadArrangement(backendUrl, a.id, onProgress)),
+    [runInModal, backendUrl, onProgress],
+  );
+
+  const closeModal = useCallback(() => {
+    if (job.running) cancelledRef.current = true;
+    setJob({ running: false });
+    setModal(null);
+  }, [job.running]);
+
+  function modalInner(view: View) {
+    if (job.running) {
+      return (
+        <ProgressPanel
+          progress={job.progress ?? { phase: 'extracting', percent: 0 }}
+          onCancel={closeModal}
+        />
+      );
+    }
+    if (job.error) {
+      return (
         <div className="panel">
           <h2>Something went wrong</h2>
-          <p className="err">{stage.message}</p>
+          <p className="err">{job.error}</p>
           <p className="hint">
             If YouTube extraction failed, try the file-upload path or the backend engine — the
             upload path works without any server.
           </p>
-          <button className="btn" onClick={reset}>
-            ← Try again
+          <button className="btn" onClick={() => setJob({ running: false })}>
+            ← Back
           </button>
         </div>
-      )}
-
-      {stage.name === 'ready' && (
-        <Mixer
-          set={stage.set}
-          title={stage.title}
-          persisted={stage.persisted}
+      );
+    }
+    if (view === 'import') return <StartPanel onStart={start} backendUrl={backendUrl} />;
+    if (view === 'library') {
+      return (
+        <LibraryPanel
           backendUrl={backendUrl}
-          onReset={reset}
+          onOpenProject={openProject}
+          onSplitSource={splitSource}
+          onOpenArrangement={openArrangement}
+          reloadKey={reloadKey}
         />
-      )}
+      );
+    }
+    return <OptionsPanel backendUrl={backendUrl} onBackendUrlChange={setBackendUrl} />;
+  }
 
-      <footer className="hint" style={{ marginTop: 28 }}>
-        Runs Demucs (htdemucs_6s) for 6-stem separation. For personal use — respect copyright and
-        YouTube&apos;s Terms of Service.
-      </footer>
-    </main>
+  return (
+    <div className="app-shell">
+      <aside className={`sidebar${navOpen ? '' : ' collapsed'}`}>
+        <button
+          className="nav-toggle"
+          onClick={toggleNav}
+          title={navOpen ? 'Collapse menu' : 'Expand menu'}
+          aria-label={navOpen ? 'Collapse menu' : 'Expand menu'}
+        >
+          {navOpen ? '«' : '☰'}
+        </button>
+        <div className="brand">
+          <span className="brand-icon">🎛</span>
+          <span className="label">YTextractor</span>
+        </div>
+        <nav>
+          {(['import', 'library', 'options'] as View[]).map((v) => (
+            <button
+              key={v}
+              className={`nav-btn${modal === v ? ' active' : ''}`}
+              onClick={() => setModal(v)}
+              title={TITLES[v]}
+            >
+              <span className="nav-icon">{v === 'import' ? '⬇' : v === 'library' ? '📚' : '⚙'}</span>
+              <span className="label">{TITLES[v]}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-foot">
+          Demucs (htdemucs_6s) 6-stem separation. For personal use — respect copyright and
+          YouTube&apos;s Terms of Service.
+        </div>
+      </aside>
+
+      <main className="app-main">
+        <Editor
+          key={sessionId}
+          initialProject={project}
+          title={title}
+          backendUrl={backendUrl}
+          onSaved={() => {
+            dirtyRef.current = false;
+            setReloadKey((k) => k + 1);
+          }}
+          onDirtyChange={(d) => {
+            dirtyRef.current = d;
+          }}
+        />
+      </main>
+
+      {modal && (
+        <div className="modal-backdrop">
+          <div className={`modal modal-${modal}`} onPointerDown={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span>{TITLES[modal]}</span>
+              <button className="modal-close" onClick={closeModal} title="Close">
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">{modalInner(modal)}</div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

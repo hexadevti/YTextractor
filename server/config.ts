@@ -5,6 +5,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const PORT = Number(process.env.PORT ?? 8787);
 
+/** Bind address. Cloud: 0.0.0.0. Desktop sets 127.0.0.1 (local only). */
+export const HOST = process.env.HOST ?? '0.0.0.0';
+
 /** Where htdemucs_6s ONNX weights live on disk (downloaded on first use). */
 export const MODEL_DIR = process.env.MODEL_DIR ?? join(__dirname, 'models');
 export const MODEL_FILE = join(MODEL_DIR, 'htdemucs_6s.onnx');
@@ -26,3 +29,10 @@ export const YTDLP_BIN =
 
 /** Max upload size for /separate (bytes). */
 export const BODY_LIMIT = Number(process.env.BODY_LIMIT ?? 300 * 1024 * 1024);
+
+/**
+ * Static web bundle to serve (the desktop/Electron build). When this directory
+ * exists the backend also serves the UI on its own origin — a self-contained
+ * monolith. The cloud backend leaves it unset and serves only the API.
+ */
+export const WEB_DIR = process.env.WEB_DIR ?? join(__dirname, '..', 'web', 'out');

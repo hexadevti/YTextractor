@@ -14,7 +14,6 @@ type InputKind = 'youtube' | 'file';
 export interface StartPanelProps {
   onStart: (config: JobConfig, file: File | null) => void;
   backendUrl: string;
-  onBackendUrlChange: (url: string) => void;
 }
 
 function Segmented<T extends string>({
@@ -42,7 +41,7 @@ function Segmented<T extends string>({
   );
 }
 
-export default function StartPanel({ onStart, backendUrl, onBackendUrlChange }: StartPanelProps) {
+export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
   const [inputKind, setInputKind] = useState<InputKind>('youtube');
   const [url, setUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -218,22 +217,13 @@ export default function StartPanel({ onStart, backendUrl, onBackendUrlChange }: 
       </div>
 
       {needsBackend && (
-        <div className="field">
-          <label htmlFor="backend">Backend URL</label>
-          <input
-            id="backend"
-            type="text"
-            value={backendUrl}
-            onChange={(e) => onBackendUrlChange(e.target.value)}
-          />
-          <p className={backendUp === false ? 'err' : 'hint'} style={{ marginTop: 6 }}>
-            {backendUp === null
-              ? 'Checking backend…'
-              : backendUp
-                ? '✓ Backend reachable'
-                : '✗ Backend not reachable — start it, or switch to browser/upload.'}
-          </p>
-        </div>
+        <p className={backendUp === false ? 'err' : 'hint'} style={{ marginBottom: 12 }}>
+          {backendUp === null
+            ? 'Checking backend…'
+            : backendUp
+              ? '✓ Backend reachable'
+              : '✗ Backend not reachable — set the URL in Options, or use file upload + browser separation.'}
+        </p>
       )}
 
       <div className="row" style={{ marginTop: 8 }}>

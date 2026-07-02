@@ -10,7 +10,12 @@ import ffmpegStatic from 'ffmpeg-static';
 import { MODEL_CHANNELS, MODEL_SAMPLE_RATE } from '@ytx/shared';
 import { TMP_DIR } from './config';
 
-const ffmpegPath = (ffmpegStatic as unknown as string) || 'ffmpeg';
+// In a packaged Electron app the binary is unpacked from the asar; ffmpeg-static
+// still returns the in-asar path, so redirect it. No-op when not packaged.
+const ffmpegPath = ((ffmpegStatic as unknown as string) || 'ffmpeg').replace(
+  'app.asar',
+  'app.asar.unpacked',
+);
 
 export interface DecodedPcm {
   channels: Float32Array[];

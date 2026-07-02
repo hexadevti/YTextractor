@@ -44,6 +44,8 @@ export interface ExtractResult {
   info: ExtractInfo;
   /** actual container extension of the audio bytes, e.g. 'm4a' | 'webm' */
   ext: string;
+  /** JPEG thumbnail bytes (YouTube only; undefined for uploads/fallback). */
+  thumb?: Buffer;
 }
 
 /** youtubei.js fallback (used only if yt-dlp is unavailable/fails). */

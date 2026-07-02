@@ -55,8 +55,16 @@ export interface SeparateEvent {
   error?: string;
 }
 
+/** Stats scraped from a YouTube video on import. */
+export interface VideoStats {
+  uploader?: string;
+  viewCount?: number;
+  likeCount?: number;
+  uploadDate?: string; // YYYYMMDD
+}
+
 /** POST /extract response metadata (audio bytes streamed separately) */
-export interface ExtractInfo {
+export interface ExtractInfo extends VideoStats {
   title: string;
   durationSeconds?: number;
   mimeType: string;
@@ -65,7 +73,7 @@ export interface ExtractInfo {
 /* ----- Library (persisted on the backend disk) ----- */
 
 /** A saved source audio (imported from YouTube or uploaded). */
-export interface SourceMeta {
+export interface SourceMeta extends VideoStats {
   id: string;
   title: string;
   origin: 'youtube' | 'file';
@@ -75,6 +83,15 @@ export interface SourceMeta {
   ext: string;
   mimeType: string;
   bytes: number;
+  hasThumb?: boolean;
+}
+
+/** Summary of a saved editable arrangement (clip layout + referenced audio). */
+export interface ArrangementSummary {
+  id: string;
+  title: string;
+  createdAt: string; // ISO
+  trackCount: number;
 }
 
 /** A saved separation project (6 stems + metadata) on disk. */

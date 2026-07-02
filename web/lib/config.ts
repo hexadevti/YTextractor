@@ -17,3 +17,7 @@ export const DEFAULT_BACKEND_URL =
 
 /** Cache Storage bucket for the downloaded model weights. */
 export const MODEL_CACHE = 'ytx-models-v1';
+
+/** Basic Pitch (audio→MIDI) TF.js model, self-hosted under public/ (same-origin). */
+export const BASIC_PITCH_MODEL_URL =
+  process.env.NEXT_PUBLIC_BASIC_PITCH_MODEL_URL ?? '/models/basic-pitch/model.json';

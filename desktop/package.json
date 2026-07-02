@@ -1,0 +1,58 @@
+{
+  "name": "desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "YTextractor desktop app (Electron) — bundles the UI + backend into one Windows app.",
+  "main": "main.mjs",
+  "scripts": {
+    "build:web": "cross-env BUILD_TARGET=desktop npm --prefix ../web run build",
+    "build:backend": "node build-backend.mjs",
+    "build": "npm run build:web && npm run build:backend",
+    "dev": "npm run build && electron main.mjs",
+    "dist": "npm run build && electron-builder --win"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/static": "^8.0.3",
+    "fastify": "^5.2.0",
+    "ffmpeg-static": "^5.2.0",
+    "onnxruntime-node": "^1.20.1",
+    "youtubei.js": "^17.2.0"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0"
+  },
+  "build": {
+    "appId": "com.ytextractor.desktop",
+    "productName": "YTextractor",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.mjs",
+      "dist/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/out",
+        "to": "web"
+      }
+    ],
+    "asarUnpack": [
+      "**/node_modules/onnxruntime-node/**",
+      "**/node_modules/ffmpeg-static/**"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

@@ -11,9 +11,11 @@
 
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import {
   separateMixture,
   STEM_NAMES,
@@ -22,21 +24,28 @@ import {
   type StemName,
   type StemSet,
 } from '@ytx/shared';
-import { BODY_LIMIT, PORT } from './config';
+import { BODY_LIMIT, HOST, PORT, WEB_DIR } from './config';
 import { decodePcm, encodeWav } from './decode';
 import { createNodeRuntime, ensureModel } from './separation.node';
 import { extractAudio } from './extract.node';
 import {
+  createArrangement,
   createProjectShell,
+  deleteArrangement,
   deleteProject,
   deleteSource,
+  getArrangementBufferPath,
+  getArrangementManifest,
   getProjectStemPath,
   getSource,
+  getSourceThumbPath,
+  listArrangements,
   listProjects,
   listSources,
   readSourceBytes,
   saveProject,
   saveSource,
+  writeArrangementBuffer,
   writeProjectStemWav,
 } from './library';
 
@@ -126,8 +135,12 @@ async function main() {
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
 
-  // COEP/CORP: allow the cross-origin-isolated web app to read our responses.
+  // Cross-origin isolation: COOP+COEP make the served UI cross-origin isolated
+  // (SharedArrayBuffer for onnxruntime-web threads + the AudioWorklet recorder);
+  // CORP lets a separately-hosted cross-origin web app read these responses too.
   app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('Cross-Origin-Opener-Policy', 'same-origin');
+    reply.header('Cross-Origin-Embedder-Policy', 'credentialless');
     reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
     return payload;
   });
@@ -168,7 +181,7 @@ async function main() {
   app.post('/library/import', async (req, reply) => {
     const body = parseJson<{ url: string }>(req.body);
     if (!body?.url) return reply.code(400).send('Missing url');
-    const { bytes, info, ext } = await extractAudio(body.url);
+    const { bytes, info, ext, thumb } = await extractAudio(body.url);
     const source = await saveSource({
       bytes,
       title: info.title,
@@ -177,6 +190,11 @@ async function main() {
       durationSeconds: info.durationSeconds,
       ext,
       mimeType: info.mimeType,
+      thumb,
+      uploader: info.uploader,
+      viewCount: info.viewCount,
+      likeCount: info.likeCount,
+      uploadDate: info.uploadDate,
     });
     return reply.send(source);
   });
@@ -202,6 +220,17 @@ async function main() {
     return reply
       .header('Content-Type', found.meta.mimeType)
       .header('Content-Disposition', `inline; filename="${found.meta.id}.${found.meta.ext}"`)
+      .send(bytes);
+  });
+
+  app.get('/library/sources/:id/thumb', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const path = await getSourceThumbPath(id);
+    if (!path) return reply.code(404).send('No thumbnail');
+    const bytes = await readFile(path);
+    return reply
+      .header('Content-Type', 'image/jpeg')
+      .header('Cache-Control', 'public, max-age=86400')
       .send(bytes);
   });
 
@@ -255,6 +284,46 @@ async function main() {
 
   app.delete('/library/projects/:id', async (req, reply) => {
     await deleteProject((req.params as { id: string }).id);
+    return reply.send({ ok: true });
+  });
+
+  /* ---------------- Library: arrangements (editable clip layouts) ---------------- */
+
+  app.get('/library/arrangements', async () => listArrangements());
+
+  app.post('/library/arrangements', async (req, reply) => {
+    const manifest = parseJson<Record<string, unknown>>(req.body);
+    if (!manifest) return reply.code(400).send('Invalid manifest');
+    const { id } = await createArrangement(manifest);
+    return reply.send({ id });
+  });
+
+  app.get('/library/arrangements/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const manifest = await getArrangementManifest(id);
+    if (!manifest) return reply.code(404).send('Unknown arrangement');
+    return reply.send(manifest);
+  });
+
+  app.put('/library/arrangements/:id/buffers/:bufferId', async (req, reply) => {
+    const { id, bufferId } = req.params as { id: string; bufferId: string };
+    const wav = req.body as Buffer;
+    if (!wav || wav.length === 0) return reply.code(400).send('Empty buffer');
+    const ok = await writeArrangementBuffer(id, bufferId, wav);
+    if (!ok) return reply.code(404).send('Unknown arrangement or bad buffer id');
+    return reply.send({ ok: true });
+  });
+
+  app.get('/library/arrangements/:id/buffers/:bufferId', async (req, reply) => {
+    const { id, bufferId } = req.params as { id: string; bufferId: string };
+    const path = await getArrangementBufferPath(id, bufferId);
+    if (!path) return reply.code(404).send('Unknown buffer');
+    const wav = await readFile(path);
+    return reply.header('Content-Type', 'audio/wav').send(wav);
+  });
+
+  app.delete('/library/arrangements/:id', async (req, reply) => {
+    await deleteArrangement((req.params as { id: string }).id);
     return reply.send({ ok: true });
   });
 
@@ -345,7 +414,13 @@ async function main() {
     return reply.header('Content-Type', 'audio/wav').send(wav);
   });
 
-  await app.listen({ port: PORT, host: '0.0.0.0' });
+  // Desktop/monolith: serve the static web bundle on our own origin if present.
+  if (existsSync(WEB_DIR)) {
+    await app.register(fastifyStatic, { root: WEB_DIR, index: ['index.html'] });
+    app.log.info(`Serving web UI from ${WEB_DIR}`);
+  }
+
+  await app.listen({ port: PORT, host: HOST });
   console.log(`YTextractor backend listening on http://localhost:${PORT}`);
 }
 

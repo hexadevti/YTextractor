@@ -9,12 +9,15 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@ytx/shared": "*",
     "@breezystack/lamejs": "^1.2.7",
+    "@spotify/basic-pitch": "^1.0.1",
+    "@tensorflow/tfjs": "^4.22.0",
+    "@ytx/shared": "*",
     "next": "^15.1.6",
     "onnxruntime-web": "^1.20.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "smplr": "^1.0.0",
     "youtubei.js": "^17.2.0"
   },
   "devDependencies": {

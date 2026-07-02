@@ -5,6 +5,7 @@
 
 import {
   STEM_NAMES,
+  type ArrangementSummary,
   type ProgressUpdate,
   type ProjectMeta,
   type SourceMeta,
@@ -24,6 +25,16 @@ export async function listProjects(baseUrl: string): Promise<ProjectMeta[]> {
   const res = await fetch(`${baseUrl}/library/projects`);
   if (!res.ok) throw new Error(`Failed to list projects (${res.status})`);
   return res.json();
+}
+
+export async function listArrangements(baseUrl: string): Promise<ArrangementSummary[]> {
+  const res = await fetch(`${baseUrl}/library/arrangements`);
+  if (!res.ok) throw new Error(`Failed to list arrangements (${res.status})`);
+  return res.json();
+}
+
+export async function deleteArrangement(baseUrl: string, id: string): Promise<void> {
+  await fetch(`${baseUrl}/library/arrangements/${id}`, { method: 'DELETE' });
 }
 
 export async function importYouTube(baseUrl: string, url: string): Promise<SourceMeta> {
@@ -57,6 +68,11 @@ export async function uploadSource(baseUrl: string, file: File): Promise<SourceM
 /** Direct URL to open/play/download a saved source's audio. */
 export function sourceAudioUrl(baseUrl: string, id: string): string {
   return `${baseUrl}/library/sources/${id}/audio`;
+}
+
+/** Direct URL to a saved source's stored JPEG thumbnail (YouTube imports). */
+export function sourceThumbUrl(baseUrl: string, id: string): string {
+  return `${baseUrl}/library/sources/${id}/thumb`;
 }
 
 export async function getSourceAudioBytes(baseUrl: string, id: string): Promise<ArrayBuffer> {

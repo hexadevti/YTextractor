@@ -18,10 +18,12 @@ import { encodeWav } from './decode';
 
 const SOURCES_DIR = join(LIBRARY_DIR, 'sources');
 const PROJECTS_DIR = join(LIBRARY_DIR, 'projects');
+const ARRANGE_DIR = join(LIBRARY_DIR, 'arrangements');
 
 async function ensureDirs() {
   await mkdir(SOURCES_DIR, { recursive: true });
   await mkdir(PROJECTS_DIR, { recursive: true });
+  await mkdir(ARRANGE_DIR, { recursive: true });
 }
 
 async function readMeta<T>(dir: string, id: string): Promise<T | null> {
@@ -43,6 +45,12 @@ export interface SaveSourceInput {
   durationSeconds?: number;
   ext: string;
   mimeType: string;
+  /** JPEG thumbnail bytes (YouTube imports). */
+  thumb?: Buffer;
+  uploader?: string;
+  viewCount?: number;
+  likeCount?: number;
+  uploadDate?: string;
 }
 
 export async function saveSource(input: SaveSourceInput): Promise<SourceMeta> {
@@ -51,6 +59,8 @@ export async function saveSource(input: SaveSourceInput): Promise<SourceMeta> {
   const dir = join(SOURCES_DIR, id);
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, `audio.${input.ext}`), input.bytes);
+  const hasThumb = !!input.thumb && input.thumb.length > 0;
+  if (hasThumb) await writeFile(join(dir, 'thumb.jpg'), input.thumb!);
   const meta: SourceMeta = {
     id,
     title: input.title,
@@ -61,9 +71,25 @@ export async function saveSource(input: SaveSourceInput): Promise<SourceMeta> {
     ext: input.ext,
     mimeType: input.mimeType,
     bytes: input.bytes.length,
+    hasThumb,
+    uploader: input.uploader,
+    viewCount: input.viewCount,
+    likeCount: input.likeCount,
+    uploadDate: input.uploadDate,
   };
   await writeFile(join(dir, 'meta.json'), JSON.stringify(meta, null, 2));
   return meta;
+}
+
+/** Absolute path to a source's stored thumbnail, or null if none saved. */
+export async function getSourceThumbPath(id: string): Promise<string | null> {
+  const path = join(SOURCES_DIR, id, 'thumb.jpg');
+  try {
+    await stat(path);
+    return path;
+  } catch {
+    return null;
+  }
 }
 
 export async function listSources(): Promise<SourceMeta[]> {
@@ -209,4 +235,93 @@ export async function getProjectMeta(id: string): Promise<ProjectMeta | null> {
 
 export async function deleteProject(id: string): Promise<void> {
   await rm(join(PROJECTS_DIR, id), { recursive: true, force: true });
+}
+
+/* ---------- arrangements (editable clip layouts) ---------- */
+
+/** manifest.json is a client-defined layout; we add id/createdAt and read a few fields. */
+interface ArrangementManifest {
+  id?: string;
+  createdAt?: string;
+  title?: string;
+  tracks?: unknown[];
+  [k: string]: unknown;
+}
+
+const BUF_ID_RE = /^[a-zA-Z0-9_]+$/;
+
+export async function createArrangement(
+  manifest: ArrangementManifest,
+): Promise<{ id: string; createdAt: string }> {
+  await ensureDirs();
+  const id = randomUUID();
+  const createdAt = new Date().toISOString();
+  const dir = join(ARRANGE_DIR, id);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, 'manifest.json'), JSON.stringify({ ...manifest, id, createdAt }, null, 2));
+  return { id, createdAt };
+}
+
+export async function writeArrangementBuffer(
+  id: string,
+  bufferId: string,
+  wav: Buffer,
+): Promise<boolean> {
+  if (!BUF_ID_RE.test(bufferId)) return false;
+  const dir = join(ARRANGE_DIR, id);
+  try {
+    await stat(join(dir, 'manifest.json'));
+  } catch {
+    return false;
+  }
+  await writeFile(join(dir, `buf_${bufferId}.wav`), wav);
+  return true;
+}
+
+export async function getArrangementManifest(id: string): Promise<ArrangementManifest | null> {
+  try {
+    return JSON.parse(await readFile(join(ARRANGE_DIR, id, 'manifest.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+export async function getArrangementBufferPath(
+  id: string,
+  bufferId: string,
+): Promise<string | null> {
+  if (!BUF_ID_RE.test(bufferId)) return null;
+  const path = join(ARRANGE_DIR, id, `buf_${bufferId}.wav`);
+  try {
+    await stat(path);
+    return path;
+  } catch {
+    return null;
+  }
+}
+
+export async function listArrangements(): Promise<
+  { id: string; title: string; createdAt: string; trackCount: number }[]
+> {
+  await ensureDirs();
+  const ids = await readdir(ARRANGE_DIR).catch(() => []);
+  const out = await Promise.all(
+    ids.map(async (id) => {
+      const m = await getArrangementManifest(id);
+      if (!m) return null;
+      return {
+        id,
+        title: (m.title as string) ?? 'Untitled',
+        createdAt: (m.createdAt as string) ?? '',
+        trackCount: Array.isArray(m.tracks) ? m.tracks.length : 0,
+      };
+    }),
+  );
+  return out
+    .filter((x): x is { id: string; title: string; createdAt: string; trackCount: number } => x !== null)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function deleteArrangement(id: string): Promise<void> {
+  await rm(join(ARRANGE_DIR, id), { recursive: true, force: true });
 }

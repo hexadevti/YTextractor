@@ -14,7 +14,12 @@ import ffmpegStatic from 'ffmpeg-static';
 import type { ExtractInfo } from '@ytx/shared';
 import { TMP_DIR, YTDLP_BIN, YTDLP_DIR } from './config';
 
-const ffmpegPath = (ffmpegStatic as unknown as string) || 'ffmpeg';
+// In a packaged Electron app the binary is unpacked from the asar; ffmpeg-static
+// still returns the in-asar path, so redirect it. No-op when not packaged.
+const ffmpegPath = ((ffmpegStatic as unknown as string) || 'ffmpeg').replace(
+  'app.asar',
+  'app.asar.unpacked',
+);
 
 const YTDLP_URLS: Record<string, string> = {
   win32: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe',
@@ -54,7 +59,13 @@ function run(
   args: string[],
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(bin, args);
+    // When the backend runs inside Electron, `process.execPath` is the Electron
+    // binary — which yt-dlp is told to use as its JS runtime (for nsig
+    // deciphering). ELECTRON_RUN_AS_NODE makes that binary behave like plain
+    // Node when yt-dlp invokes it. Harmless under a normal Node process.
+    const proc = spawn(bin, args, {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    });
     let stdout = '';
     let stderr = '';
     proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
@@ -68,7 +79,7 @@ const SEP = '\x1f'; // unit separator, unlikely to appear in a title
 
 export async function extractWithYtDlp(
   url: string,
-): Promise<{ bytes: Buffer; info: ExtractInfo; ext: string }> {
+): Promise<{ bytes: Buffer; info: ExtractInfo; ext: string; thumb?: Buffer }> {
   const bin = await ensureYtDlp((m) => console.log(m));
   await mkdir(TMP_DIR, { recursive: true });
   const uid = `yt_${process.pid}_${Date.now() % 1e9}`;
@@ -80,6 +91,9 @@ export async function extractWithYtDlp(
     '--no-playlist',
     '--no-part',
     '--no-progress',
+    '--write-thumbnail',
+    '--convert-thumbnails',
+    'jpg',
     '--js-runtimes',
     `node:${process.execPath}`,
     '--ffmpeg-location',
@@ -87,7 +101,7 @@ export async function extractWithYtDlp(
     '-o',
     outTmpl,
     '--print',
-    `after_move:%(title)s${SEP}%(duration)s${SEP}%(filepath)s`,
+    `after_move:%(title)s${SEP}%(duration)s${SEP}%(filepath)s${SEP}%(uploader)s${SEP}%(view_count)s${SEP}%(like_count)s${SEP}%(upload_date)s`,
     url,
   ]);
 
@@ -97,7 +111,24 @@ export async function extractWithYtDlp(
 
   // Parse the after_move print line (last non-empty stdout line).
   const line = stdout.split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? '';
-  const [title, durationStr, filepath] = line.split(SEP);
+  const [title, durationStr, filepath, uploader, viewStr, likeStr, uploadDate] = line.split(SEP);
+
+  // yt-dlp writes the converted thumbnail next to the audio as <uid>.jpg.
+  const thumbPath = join(TMP_DIR, `${uid}.jpg`);
+  let thumb: Buffer | undefined;
+  try {
+    if (await fileExists(thumbPath)) thumb = await readFile(thumbPath);
+  } catch {
+    thumb = undefined;
+  } finally {
+    await rm(thumbPath, { force: true });
+  }
+
+  const na = (v?: string) => (v && v !== 'NA' ? v : undefined);
+  const num = (v?: string) => {
+    const n = Number(na(v));
+    return Number.isFinite(n) ? n : undefined;
+  };
 
   let finalPath = filepath;
   if (!finalPath || !(await fileExists(finalPath))) {
@@ -123,10 +154,15 @@ export async function extractWithYtDlp(
     return {
       bytes,
       ext,
+      thumb,
       info: {
         title: title || 'audio',
         durationSeconds: Number.isFinite(duration) ? duration : undefined,
         mimeType,
+        uploader: na(uploader),
+        viewCount: num(viewStr),
+        likeCount: num(likeStr),
+        uploadDate: na(uploadDate),
       },
     };
   } finally {
