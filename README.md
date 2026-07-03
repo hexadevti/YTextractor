@@ -2,7 +2,7 @@
   <img src="Prismaxim.png" alt="Prismaxim" width="300">
 </p>
 
-# 🎛 Prismaxim — Stem Splitter & Multitrack Editor
+# Prismaxim — Stem Splitter & Multitrack Editor
 
 Extract audio from a **YouTube link** or an **uploaded file**, split it into 6 stems with
 **Demucs (`htdemucs_6s`)**, and work with them in a **clip-based multitrack editor** — per-track

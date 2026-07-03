@@ -1,5 +1,6 @@
-// Renders build/icon.svg into a multi-resolution Windows icon (build/icon.ico)
-// plus PNGs for the running window / other platforms. Run: node build-icon.mjs
+// Downscales the source artwork (Prismaxim-noname.png at the repo root) into a
+// multi-resolution Windows icon (build/icon.ico) plus PNGs for the running window /
+// other platforms. It only resizes — it never generates new art. Run: node build-icon.mjs
 import sharp from 'sharp';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -9,12 +10,21 @@ const here = dirname(fileURLToPath(import.meta.url));
 const buildDir = join(here, 'build');
 mkdirSync(buildDir, { recursive: true });
 
-const svg = readFileSync(join(buildDir, 'icon.svg'));
+const source = readFileSync(join(here, '..', 'Prismaxim-noname.png'));
 const SIZES = [16, 24, 32, 48, 64, 128, 256];
 
-// Rasterize the SVG at high density, then downscale to each icon size for crisp AA.
-const render = (size) =>
-  sharp(svg, { density: 384 }).resize(size, size, { fit: 'contain' }).png().toBuffer();
+// The full 1254px art has lots of empty space, so it turns muddy at tiny sizes.
+// For small icons, crop tight to the prism (flare + rainbow) so it stays legible.
+// Larger sizes keep the full framed composition.
+const PRISM_CROP = { left: 265, top: 265, width: 700, height: 700 };
+const CROP_AT_OR_BELOW = 32;
+
+// Downscale the source to each icon size (high-quality Lanczos, no re-rendering).
+const render = (size) => {
+  const img = sharp(source);
+  if (size <= CROP_AT_OR_BELOW) img.extract(PRISM_CROP);
+  return img.resize(size, size, { fit: 'cover' }).png().toBuffer();
+};
 
 const pngs = await Promise.all(SIZES.map(render));
 
