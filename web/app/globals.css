@@ -120,7 +120,8 @@ a,
 /* ---------- single-page app shell ---------- */
 .app-shell {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden; /* the main area scrolls internally — no spurious body scrollbar */
 }
 
 .sidebar {
@@ -291,6 +292,7 @@ a,
   flex: 1;
   min-width: 0;
   padding: 24px 24px 60px;
+  overflow-y: auto; /* scrolls only when its content genuinely overflows */
 }
 
 /* ---------- popup modals ---------- */

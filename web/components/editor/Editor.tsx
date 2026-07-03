@@ -292,13 +292,19 @@ export default function Editor({
     let raf = 0;
     const tick = () => {
       const t = engine.currentTime();
-      // Auto-follow: when zoomed in enough that the playhead would leave the
-      // visible window, page the view forward (or back) so it stays on screen.
+      // Auto-follow: once the playhead passes 3/4 of the visible window, scroll
+      // the view gradually so it stays pinned there and the track keeps moving
+      // under it. (If it falls behind the view — e.g. a rewind — snap it back.)
       if (engine.isPlaying && viewportWidthRef.current > 0 && pxRef.current > 0) {
         const viewportSec = viewportWidthRef.current / pxRef.current;
-        if (t > scrollRef.current + viewportSec || t < scrollRef.current) {
-          const next = Math.max(0, t - viewportSec * 0.1);
-          scrollRef.current = next; // update immediately so this frame draws in place
+        const anchor = viewportSec * 0.75;
+        let next = scrollRef.current;
+        if (t - scrollRef.current > anchor) next = t - anchor;
+        else if (t < scrollRef.current) next = t;
+        next = Math.max(0, next);
+        // Update only on a visible (≥ ~0.5 px) change to avoid needless redraws.
+        if (Math.abs(next - scrollRef.current) * pxRef.current >= 0.5) {
+          scrollRef.current = next; // apply now so this frame draws in place
           setScrollSec(next);
         }
       }
@@ -534,10 +540,19 @@ export default function Editor({
   const seekTo = (sec: number) => {
     const eng = engineRef.current;
     if (!eng) return;
-    eng.seek(Math.max(0, sec));
+    const target = Math.max(0, sec);
+    eng.seek(target);
     if (eng.isPlaying) {
       stopMetro();
       startMetro(eng.currentTime());
+    }
+    // Keep the playhead on screen: if the target is off the visible window
+    // (e.g. rewinding to the start while zoomed in), scroll the view to it.
+    const viewportSec = pxRef.current > 0 ? viewportWidthRef.current / pxRef.current : 0;
+    if (viewportSec > 0 && (target < scrollRef.current || target > scrollRef.current + viewportSec)) {
+      const next = Math.max(0, target - viewportSec * 0.1);
+      scrollRef.current = next;
+      setScrollSec(next);
     }
     setTimeSec(sec);
   };
