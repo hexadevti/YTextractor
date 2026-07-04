@@ -1,7 +1,7 @@
 {
   "name": "desktop",
   "productName": "Prismaxim",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Prismaxim desktop app (Electron) — bundles the UI + backend into one Windows app.",
   "repository": {

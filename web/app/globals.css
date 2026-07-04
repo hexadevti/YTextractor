@@ -602,6 +602,82 @@ input[type='url']:focus {
   color: var(--danger);
 }
 
+/* stem picker (which of the 6 stems to separate) */
+.stem-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.stem-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease,
+    border-color 0.14s ease,
+    opacity 0.14s ease;
+}
+
+.stem-chip:hover:not(:disabled) {
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+.stem-chip.active {
+  color: var(--text);
+  background: var(--panel-3);
+}
+
+.stem-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.stem-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.stem-picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.stem-all {
+  background: transparent;
+  border: none;
+  color: var(--accent-2);
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.stem-all:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+@media (max-width: 520px) {
+  .stem-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 .warn {
   color: #fbbf24;
   font-size: 12.5px;
@@ -1939,4 +2015,163 @@ body.drag-trim * {
   width: 2px;
   background: var(--text);
   opacity: 0.85;
+}
+
+/* ============================ Responsive / touch ============================
+   The desktop layout is a fixed 210px sidebar + an internally-scrolling editor.
+   On phones/tablets (<=820px) the sidebar becomes an off-canvas drawer (driven
+   by the same `navOpen` state as the desktop rail — see app/page.tsx), the shell
+   switches to dynamic viewport units + safe-area insets (notch / home
+   indicator), modals go full-screen, and touch targets grow to >=44px.
+   The floating hamburger (.mobile-nav-open) and the drawer backdrop
+   (.drawer-backdrop) are hidden on desktop and only appear on small screens. */
+
+/* Dynamic viewport height so mobile browser chrome doesn't clip the shell. */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.mobile-nav-open,
+.drawer-backdrop {
+  display: none;
+}
+
+/* Mobile-only pill toggling the quick mixer vs the full editor. Rendered only in
+   the Capacitor build (gated on IS_MOBILE in page.tsx), so it needs no media
+   query to stay hidden on the web/desktop builds. */
+.mobile-view-toggle {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 16px);
+  right: calc(env(safe-area-inset-right, 0px) + 12px);
+  z-index: 140;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 20px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-pop);
+}
+
+@media (max-width: 820px) {
+  /* Sidebar → fixed off-canvas drawer. */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    width: min(82vw, 300px);
+    z-index: 200;
+    transform: translateX(0);
+    transition: transform 0.2s ease;
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    padding-left: max(12px, env(safe-area-inset-left));
+  }
+
+  /* When "collapsed" (navOpen=false) the drawer slides off-screen instead of
+     shrinking to the desktop 60px rail; keep labels/foot visible when open. */
+  .sidebar.collapsed {
+    width: min(82vw, 300px);
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: 12px;
+    transform: translateX(-100%);
+  }
+  .sidebar.collapsed .label,
+  .sidebar.collapsed .sidebar-foot {
+    display: revert;
+  }
+  .sidebar.collapsed .nav-btn {
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  /* Dim backdrop behind the open drawer (rendered only when navOpen). */
+  .drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    background: rgba(4, 6, 12, 0.5);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+  }
+
+  /* Floating hamburger to open the drawer (the in-drawer chevron closes it). */
+  .mobile-nav-open {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    left: calc(env(safe-area-inset-left, 0px) + 12px);
+    z-index: 140;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    box-shadow: var(--shadow-pop);
+  }
+
+  /* Main area: reclaim the sidebar's width, pad for safe areas, and leave room
+     at the top for the floating hamburger so the editor doesn't hide under it. */
+  .app-main {
+    padding: 12px;
+    /* Clear the floating hamburger/toggle (top inset + 16px offset + 44px button
+       + 14px gap) so content isn't hidden under them or the status bar/notch. */
+    padding-top: calc(env(safe-area-inset-top, 0px) + 74px);
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  /* Bigger touch targets in the drawer. */
+  .nav-btn {
+    padding: 12px;
+    min-height: 44px;
+  }
+  .nav-toggle {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Modals become full-screen sheets. */
+  .modal-backdrop {
+    padding: 0;
+    align-items: stretch;
+  }
+  .modal,
+  .modal.modal-library {
+    width: 100%;
+    max-width: 100%;
+    min-height: 100dvh;
+    max-height: none;
+    border: none;
+    border-radius: 0;
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+      max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+
+  /* Quick-mixer view: let the panel scroll and stack each track vertically
+     (name+controls / waveform / volume) so nothing overflows a phone width. */
+  .app-main.mixer-mode {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .track {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .track input[type='range'] {
+    width: 100%;
+  }
+  .track .controls button {
+    width: 40px;
+    height: 36px;
+  }
 }

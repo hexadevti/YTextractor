@@ -7,6 +7,7 @@ import { computeClipPeaks } from '@/lib/editor/peaks';
 import { drawSpectrum, freqBuffer } from '@/lib/mixer/spectrum';
 import { meterFraction, rmsLevel, timeBuffer } from '@/lib/mixer/meter';
 import { INSTRUMENT_GROUPS, getInstrument } from '@/lib/editor/instruments';
+import { IS_MOBILE } from '@/lib/env';
 
 export const LANE_HEIGHT = 88;
 export const SIDEBAR_WIDTH = 158;
@@ -469,7 +470,7 @@ export default function TimelineTrack({
           <button className="mini" title="Delete track (undoable)" onClick={() => onDeleteTrack(track.id)}>
             <Trash2 size={13} />
           </button>
-          {track.clips.length > 0 && (
+          {!IS_MOBILE && track.clips.length > 0 && (
             <button
               className="mini"
               title="Convert this track's audio to MIDI"
@@ -512,7 +513,9 @@ export default function TimelineTrack({
         <canvas
           ref={canvasRef}
           className="lane-canvas"
-          style={{ width: viewportWidth, height: laneHeight }}
+          // On mobile, take full control of touch (pan + pinch-zoom) so the
+          // browser doesn't hijack the gestures; desktop keeps default behavior.
+          style={{ width: viewportWidth, height: laneHeight, touchAction: IS_MOBILE ? 'none' : undefined }}
           onPointerDown={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
             onPointerDown(e, track.id, e.clientX - rect.left, e.clientY - rect.top);
@@ -536,7 +539,9 @@ export default function TimelineTrack({
           className="lane-rec"
           style={{ width: viewportWidth, height: laneHeight }}
         />
-        {!isMidi && (
+        {/* View toggles are desktop-only; on mobile spectrum stays on and the
+            waveform stays simplified (the state defaults). */}
+        {!isMidi && !IS_MOBILE && (
           <div className="lane-view-toggles" onPointerDown={(e) => e.stopPropagation()}>
             <button
               className={`view-toggle${spectrumOn ? ' on' : ''}`}

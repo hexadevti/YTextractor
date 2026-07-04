@@ -8,6 +8,7 @@ import { store } from '@/lib/store';
 import { cloudConfigured } from '@/lib/cloudConfig';
 import { downloadBlob, encodeWav, renderProject } from '@/lib/editor/export';
 import { fromStemSet, makeAudioBuffer } from '@/lib/editor/model';
+import StemPicker from './StemPicker';
 
 function fmtDate(iso: string): string {
   try {
@@ -197,7 +198,7 @@ function ProjectDownloadMenu({ project }: { project: ProjectMeta }) {
 
 export interface LibraryPanelProps {
   onOpenProject: (project: ProjectMeta) => void;
-  onSplitSource: (source: SourceMeta, useCloud: boolean) => void;
+  onSplitSource: (source: SourceMeta, useCloud: boolean, stems: StemName[]) => void;
   onOpenArrangement: (arr: ArrangementSummary) => void;
   reloadKey?: number;
 }
@@ -215,6 +216,9 @@ export default function LibraryPanel({
   // Opt-in cloud "fast mode" for re-splitting a saved source.
   const [hasCloud, setHasCloud] = useState(false);
   const [useCloud, setUseCloud] = useState(false);
+  // Which stems a re-split produces (shared across the sources below). Default:
+  // none — the source loads unseparated unless the user picks stems.
+  const [stems, setStems] = useState<StemName[]>([]);
 
   useEffect(() => {
     setHasCloud(cloudConfigured());
@@ -276,6 +280,12 @@ export default function LibraryPanel({
       {!error && (
         <>
           <h3 style={{ marginTop: 16 }}>Imported songs</h3>
+          {sources && sources.length > 0 && (
+            <div className="field" style={{ marginTop: 4 }}>
+              <label>Stems to separate when splitting</label>
+              <StemPicker value={stems} onChange={setStems} />
+            </div>
+          )}
           {sources && sources.length === 0 && (
             <p className="hint">No saved songs yet — split an uploaded file above.</p>
           )}
@@ -295,8 +305,8 @@ export default function LibraryPanel({
                   <Play size={14} /> Open
                 </button>
                 <DownloadButton title="Download the original audio" run={() => downloadSource(s)} />
-                <button className="btn" onClick={() => onSplitSource(s, useCloud)}>
-                  {useCloud ? 'Split ⚡' : 'Split'}
+                <button className="btn" onClick={() => onSplitSource(s, useCloud, stems)}>
+                  {stems.length === 0 ? 'Load' : useCloud ? 'Split ⚡' : 'Split'}
                 </button>
                 <button
                   className="btn ghost"

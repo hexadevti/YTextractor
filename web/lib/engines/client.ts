@@ -8,6 +8,7 @@ import {
   type ProgressUpdate,
   type SeparateEvent,
   type SeparateStartResponse,
+  type StemName,
   type StemSet,
 } from '@prismaxim/shared';
 import { decodeToModelAudio, stemSetFromChannels } from '../audio';
@@ -54,14 +55,17 @@ async function followJob(
   });
 
   const sampleRate = ready.sampleRate ?? 44100;
+  // Download only the stems the job actually produced (a subset when the user
+  // picked fewer than 6); fall back to all 6 for older backends.
+  const names = ready.stems?.length ? ready.stems : STEM_NAMES;
   const perStemChannels: Float32Array[][] = [];
-  for (const name of STEM_NAMES) {
+  for (const name of names) {
     const res = await fetch(`${baseUrl}/separate/${jobId}/stems/${name}`);
     if (!res.ok) throw new Error(`Failed to download stem "${name}" (${res.status})`);
     const decoded = await decodeToModelAudio(await res.arrayBuffer());
     perStemChannels.push(decoded.channels);
   }
-  const set = stemSetFromChannels(perStemChannels, sampleRate);
+  const set = stemSetFromChannels(perStemChannels, sampleRate, names);
   return set;
 }
 
@@ -69,16 +73,18 @@ async function followJob(
 export async function separateUpload(
   baseUrl: string,
   audioBytes: ArrayBuffer,
-  meta: { title: string; ext: string },
+  meta: { title: string; ext: string; stems?: StemName[] },
   onProgress: (p: ProgressUpdate) => void,
 ): Promise<StemSet> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/octet-stream',
+    'X-Title': encodeURIComponent(meta.title),
+    'X-Ext': meta.ext,
+  };
+  if (meta.stems && meta.stems.length) headers['X-Stems'] = meta.stems.join(',');
   const startRes = await fetch(`${baseUrl}/separate`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      'X-Title': encodeURIComponent(meta.title),
-      'X-Ext': meta.ext,
-    },
+    headers,
     body: audioBytes,
   });
   if (!startRes.ok) throw new Error(`Backend separation failed to start (${startRes.status})`);
@@ -91,11 +97,12 @@ export async function separateFromSource(
   baseUrl: string,
   sourceId: string,
   onProgress: (p: ProgressUpdate) => void,
+  stems?: StemName[],
 ): Promise<StemSet> {
   const startRes = await fetch(`${baseUrl}/separate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sourceId }),
+    body: JSON.stringify({ sourceId, stems: stems && stems.length ? stems : undefined }),
   });
   if (!startRes.ok) throw new Error(`Backend separation failed to start (${startRes.status})`);
   const { jobId } = (await startRes.json()) as SeparateStartResponse;

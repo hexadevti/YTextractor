@@ -1,17 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { ExtractionEngine, JobConfig, SeparationEngine } from '@prismaxim/shared';
+import type { ExtractionEngine, JobConfig, SeparationEngine, StemName } from '@prismaxim/shared';
 import { checkBackend } from '@/lib/engines/client';
-import { IS_DESKTOP } from '@/lib/env';
+import { IS_DESKTOP, IS_MOBILE } from '@/lib/env';
 import { cloudConfigured } from '@/lib/cloudConfig';
 import { addToHistory, getHistory, removeFromHistory, type HistoryEntry } from '@/lib/history';
+import StemPicker from './StemPicker';
 
 type InputKind = 'youtube' | 'file';
+export type ImportMode = 'new' | 'add';
 
 export interface StartPanelProps {
-  onStart: (config: JobConfig, file: File | null) => void;
+  onStart: (config: JobConfig, file: File | null, mode: ImportMode) => void;
   backendUrl: string;
+  /** true when the editor already has a project to add the import into. */
+  canAddToProject?: boolean;
 }
 
 function Segmented<T extends string>({
@@ -39,7 +43,7 @@ function Segmented<T extends string>({
   );
 }
 
-export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
+export default function StartPanel({ onStart, backendUrl, canAddToProject }: StartPanelProps) {
   const [inputKind, setInputKind] = useState<InputKind>(IS_DESKTOP ? 'youtube' : 'file');
   const [url, setUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -50,8 +54,18 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
   // Web build: report the browser separation engine so the user knows what to expect.
   const [hasWebGPU, setHasWebGPU] = useState<boolean | null>(null);
   // Optional cloud "fast mode": shown only when a cloud endpoint is configured.
+  // On mobile the WebView has no WebGPU and no WASM threads, so cloud is the
+  // default — on-device separation is an experimental fallback (see Options).
   const [hasCloud, setHasCloud] = useState(false);
-  const [useCloud, setUseCloud] = useState(false);
+  const [useCloud, setUseCloud] = useState(IS_MOBILE);
+  // Low-RAM mobile devices can run out of memory decoding a long 6-stem track.
+  const [lowMemory, setLowMemory] = useState(false);
+  // Which of the 6 stems to produce. Default: none — the track loads unseparated
+  // and the user opts into the stems they want. Selecting fewer cuts memory,
+  // encoding and (on cloud/backend) download — the model still runs one full pass.
+  const [stems, setStems] = useState<StemName[]>([]);
+  // Import into a fresh project (replace) or add to the one already open.
+  const [importMode, setImportMode] = useState<ImportMode>('new');
 
   // Load link history on mount (client-only).
   useEffect(() => {
@@ -59,8 +73,16 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
   }, []);
 
   useEffect(() => {
-    if (!IS_DESKTOP) setHasWebGPU(typeof navigator !== 'undefined' && !!navigator.gpu);
+    // WebGPU capability only matters for the pure-web build; a mobile WebView
+    // never exposes navigator.gpu, so don't surface a misleading message there.
+    if (!IS_DESKTOP && !IS_MOBILE) setHasWebGPU(typeof navigator !== 'undefined' && !!navigator.gpu);
     setHasCloud(cloudConfigured());
+    if (IS_MOBILE && typeof navigator !== 'undefined') {
+      // navigator.deviceMemory (Android/Chromium) is approximate RAM in GB, capped
+      // at 8. ≤4 GB devices risk an out-of-memory crash on long tracks.
+      const gb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+      if (typeof gb === 'number' && gb <= 4) setLowMemory(true);
+    }
   }, []);
 
   // Cloud separation currently applies to uploaded files.
@@ -87,8 +109,9 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
 
   const canStart =
     (inputKind === 'file' && !!file) || (inputKind === 'youtube' && url.trim().length > 0);
+  const willSeparate = stems.length > 0;
 
-  function start() {
+  function start(mode: ImportMode) {
     if (inputKind === 'youtube') setHistory(addToHistory(url.trim()));
     const localEngine: SeparationEngine = IS_DESKTOP ? 'backend' : 'browser';
     const separation: SeparationEngine = cloudActive ? 'cloud' : localEngine;
@@ -99,8 +122,9 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
           : { kind: 'youtube', url: url.trim(), extraction },
       separation,
       backendBaseUrl: backendUrl.replace(/\/$/, ''),
+      stems,
     };
-    onStart(config, inputKind === 'file' ? file : null);
+    onStart(config, inputKind === 'file' ? file : null, canAddToProject ? mode : 'new');
   }
 
   return (
@@ -214,6 +238,12 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
         </div>
       )}
 
+      {/* Which stems to separate (0–6). Default: none → load the original track. */}
+      <div className="field">
+        <label>Stems to separate</label>
+        <StemPicker value={stems} onChange={setStems} />
+      </div>
+
       {/* Opt-in cloud "fast mode" (only when an endpoint is configured). */}
       {cloudApplies && (
         <div className="field">
@@ -222,7 +252,10 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
             value={useCloud ? 'cloud' : 'local'}
             onChange={(v) => setUseCloud(v === 'cloud')}
             options={[
-              { value: 'local', label: IS_DESKTOP ? 'Local (native)' : 'Local (WASM)' },
+              {
+                value: 'local',
+                label: IS_DESKTOP ? 'Local (native)' : IS_MOBILE ? 'On-device (beta)' : 'Local (WASM)',
+              },
               { value: 'cloud', label: 'Cloud (fast)' },
             ]}
           />
@@ -245,6 +278,12 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
               ? '✓ Separation service ready'
               : '✗ Separation service not reachable — check the URL in Options.'}
         </p>
+      ) : IS_MOBILE ? (
+        <p className="warn" style={{ marginTop: 16, marginBottom: 12 }}>
+          {hasCloud
+            ? '⚡ Cloud is recommended on mobile. On-device (beta) runs single-threaded — slow and may fail on long tracks.'
+            : '⚠ On-device (beta) separation is slow and memory-heavy. Set a cloud endpoint in Options for fast, reliable results.'}
+        </p>
       ) : (
         <p
           className={hasWebGPU === false ? 'warn' : 'hint'}
@@ -258,9 +297,36 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
         </p>
       )}
 
+      {IS_MOBILE && lowMemory && (
+        <p className="warn" style={{ marginTop: 0, marginBottom: 12 }}>
+          ⚠ This device is low on memory — long tracks (over ~4 min) may close the app
+          while importing. Try shorter clips for the most reliable results.
+        </p>
+      )}
+
+      {canAddToProject && (
+        <div className="field">
+          <label>Import as</label>
+          <Segmented
+            value={importMode}
+            onChange={setImportMode}
+            options={[
+              { value: 'new', label: 'New project' },
+              { value: 'add', label: 'Add to open project' },
+            ]}
+          />
+        </div>
+      )}
+
       <div className="row" style={{ marginTop: 8 }}>
-        <button className="btn" disabled={!canStart} onClick={start}>
-          Split into stems →
+        <button className="btn" disabled={!canStart} onClick={() => start(importMode)}>
+          {importMode === 'add'
+            ? willSeparate
+              ? 'Separate & add ＋'
+              : 'Add track ＋'
+            : willSeparate
+              ? 'Split into stems →'
+              : 'Load track →'}
         </button>
       </div>
     </div>

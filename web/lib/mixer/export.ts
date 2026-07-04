@@ -7,6 +7,7 @@
 
 import { Mp3Encoder } from '@breezystack/lamejs';
 import type { MixerEngine } from './engine';
+import { saveOrShare } from '../platform/save';
 
 /** Render the audible channels down to a single AudioBuffer. */
 export async function renderMix(engine: MixerEngine): Promise<AudioBuffer> {
@@ -36,11 +37,14 @@ function floatToPcm16(sample: number): number {
   return s < 0 ? s * 0x8000 : s * 0x7fff;
 }
 
-/** Encode an AudioBuffer to a 16-bit PCM WAV Blob. */
-export function encodeWav(buffer: AudioBuffer): Blob {
-  const numChannels = buffer.numberOfChannels;
-  const length = buffer.length;
-  const sampleRate = buffer.sampleRate;
+/**
+ * Encode raw Float32 channels to a 16-bit PCM WAV Blob, without an intermediate
+ * AudioBuffer. Saving a fresh split calls this once per stem, so avoiding the
+ * extra full-length copy matters on memory-constrained mobile devices.
+ */
+export function encodeWavFromChannels(channels: Float32Array[], sampleRate: number): Blob {
+  const numChannels = Math.max(1, channels.length);
+  const length = channels[0]?.length ?? 0;
   const bytesPerSample = 2;
   const blockAlign = numChannels * bytesPerSample;
   const dataSize = length * blockAlign;
@@ -65,9 +69,6 @@ export function encodeWav(buffer: AudioBuffer): Blob {
   writeStr(36, 'data');
   view.setUint32(40, dataSize, true);
 
-  const channels: Float32Array[] = [];
-  for (let c = 0; c < numChannels; c++) channels.push(buffer.getChannelData(c));
-
   let offset = 44;
   for (let i = 0; i < length; i++) {
     for (let c = 0; c < numChannels; c++) {
@@ -76,6 +77,13 @@ export function encodeWav(buffer: AudioBuffer): Blob {
     }
   }
   return new Blob([out], { type: 'audio/wav' });
+}
+
+/** Encode an AudioBuffer to a 16-bit PCM WAV Blob. */
+export function encodeWav(buffer: AudioBuffer): Blob {
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c));
+  return encodeWavFromChannels(channels, buffer.sampleRate);
 }
 
 /** Encode an AudioBuffer to MP3 using lamejs. */
@@ -108,14 +116,13 @@ export function encodeMp3(buffer: AudioBuffer, kbps = 192): Blob {
   return new Blob(chunks as BlobPart[], { type: 'audio/mpeg' });
 }
 
-/** Trigger a browser download for a Blob. */
+/**
+ * Save a Blob to the device. Browser download on web/desktop; native share sheet
+ * on mobile (see lib/platform/save.ts). Kept as a `void` helper so all existing
+ * export/download call sites stay unchanged; failures are logged, not thrown.
+ */
 export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  void saveOrShare(blob, filename).catch((err) => {
+    console.error('Save/share failed:', err);
+  });
 }

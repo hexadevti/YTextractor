@@ -10,18 +10,23 @@
  *    backend, which also persists to the filesystem library.
  */
 
-import type { JobConfig, ProgressUpdate, SourceMeta, StemSet } from '@prismaxim/shared';
-import { IS_DESKTOP } from './env';
+import type { JobConfig, ProgressUpdate, SourceMeta, StemName, StemSet } from '@prismaxim/shared';
+import { IS_DESKTOP, IS_MOBILE } from './env';
 import { decodeToModelAudio } from './audio';
 import { separateInBrowser } from './engines/separation.web';
 import { separateOnCloud } from './engines/cloud';
 import { getCloudToken, getCloudUrl } from './cloudConfig';
 import { separateFromSource, separateUpload } from './engines/client';
-import { importYouTube } from './library';
+import { getSourceAudioBytes, importYouTube, uploadSource } from './library';
+import { singleTrackProject, type EditorProject } from './editor/model';
 import { store } from './store';
 
 export interface JobResult {
-  set: StemSet;
+  /** Present for a separation job (the 6-or-fewer stems). */
+  set?: StemSet;
+  /** Present when the user chose no separation (0 stems): the original mixture
+   *  as a single unseparated editor track. */
+  project?: EditorProject;
   title: string;
   /** true if the result was persisted to the library */
   persisted: boolean;
@@ -43,11 +48,12 @@ async function separateAndPersistInBrowser(
   title: string,
   sourceId: string | undefined,
   onProgress: (p: ProgressUpdate) => void,
+  stems?: StemName[],
 ): Promise<StemSet> {
   const audio = await decodeToModelAudio(bytes);
   const { wrapped, state } = engineTracker(onProgress);
   const t0 = performance.now();
-  const set = await separateInBrowser(audio, wrapped);
+  const set = await separateInBrowser(audio, wrapped, stems);
   const separationMs = Math.round(performance.now() - t0);
   await store.saveProject(set, { title, sourceId, engine: state.engine, separationMs }, onProgress);
   return set;
@@ -59,8 +65,9 @@ async function cloudSeparateBytes(
   title: string,
   sourceId: string | undefined,
   onProgress: (p: ProgressUpdate) => void,
+  stems?: StemName[],
 ): Promise<StemSet> {
-  const set = await separateOnCloud(getCloudUrl(), getCloudToken(), bytes, onProgress);
+  const set = await separateOnCloud(getCloudUrl(), getCloudToken(), bytes, onProgress, stems);
   await store.saveProject(set, { title, sourceId, engine: 'cloud' }, onProgress);
   return set;
 }
@@ -70,9 +77,54 @@ async function separateAndPersistOnCloud(
   file: File,
   title: string,
   onProgress: (p: ProgressUpdate) => void,
+  stems?: StemName[],
 ): Promise<StemSet> {
   const source = await store.saveSource(file);
-  return cloudSeparateBytes(await file.arrayBuffer(), title, source.id, onProgress);
+  return cloudSeparateBytes(await file.arrayBuffer(), title, source.id, onProgress, stems);
+}
+
+/**
+ * No separation requested (0 stems): resolve the source audio and hand it back
+ * as a single unseparated track. Runs entirely client-side on every platform —
+ * no browser/backend/cloud engine, no Demucs pass. The original upload is still
+ * saved as a library source so it can be split later.
+ */
+async function loadOriginalTrack(
+  config: JobConfig,
+  file: File | null,
+  onProgress: (p: ProgressUpdate) => void,
+): Promise<JobResult> {
+  const { input, backendBaseUrl } = config;
+  onProgress({ phase: 'extracting', percent: 10, message: 'Loading track…' });
+
+  let bytes: ArrayBuffer;
+  let title: string;
+
+  if (input.kind === 'file') {
+    if (!file) throw new Error('No file provided.');
+    title = file.name.replace(/\.[^.]+$/, '');
+    // Keep the original in the library (so it can be separated later).
+    if (IS_DESKTOP) await uploadSource(backendBaseUrl, file);
+    else await store.saveSource(file);
+    bytes = await file.arrayBuffer();
+  } else if (input.extraction === 'backend') {
+    // YouTube (desktop): import saves the source, then load its audio back.
+    onProgress({ phase: 'extracting', percent: 30, message: 'Importing on backend…' });
+    const source = await importYouTube(backendBaseUrl, input.url);
+    title = source.title;
+    bytes = await getSourceAudioBytes(backendBaseUrl, source.id);
+  } else {
+    // Browser-via-proxy extraction: bytes only (not persisted on this path).
+    const { extractInBrowser } = await import('./engines/extract.web');
+    bytes = await extractInBrowser(input.url, backendBaseUrl, onProgress);
+    title = input.url;
+  }
+
+  onProgress({ phase: 'loading-model', percent: 60, message: 'Decoding audio…' });
+  const audio = await decodeToModelAudio(bytes);
+  const project = singleTrackProject(audio.channels, audio.sampleRate, title);
+  onProgress({ phase: 'ready', percent: 100 });
+  return { project, title, persisted: false };
 }
 
 export async function runJob(
@@ -80,7 +132,12 @@ export async function runJob(
   file: File | null,
   onProgress: (p: ProgressUpdate) => void,
 ): Promise<JobResult> {
-  const { input, backendBaseUrl } = config;
+  const { input, backendBaseUrl, stems } = config;
+
+  /* ---------- No separation (0 stems): just load the original track ---------- */
+  if (!stems || stems.length === 0) {
+    return loadOriginalTrack(config, file, onProgress);
+  }
 
   /* ---------- Cloud (fast) — opt-in, works on both builds, upload only ---------- */
   if (config.separation === 'cloud') {
@@ -88,19 +145,23 @@ export async function runJob(
       throw new Error('Cloud separation currently supports uploaded files.');
     }
     const title = file.name.replace(/\.[^.]+$/, '');
-    const set = await separateAndPersistOnCloud(file, title, onProgress);
+    const set = await separateAndPersistOnCloud(file, title, onProgress, stems);
     return { set, title, persisted: true };
   }
 
-  /* ---------- Web build: 100% browser, upload only ---------- */
+  /* ---------- Web / mobile build: 100% browser, upload only ---------- */
   if (!IS_DESKTOP) {
     if (input.kind !== 'file' || !file) {
-      throw new Error('The web version imports audio files only. YouTube import needs the desktop app.');
+      throw new Error(
+        IS_MOBILE
+          ? 'The mobile app imports audio files only.'
+          : 'The web version imports audio files only. YouTube import needs the desktop app.',
+      );
     }
     const title = file.name.replace(/\.[^.]+$/, '');
     // Persist the original upload as a source (so it can be re-split later).
     const source = await store.saveSource(file);
-    const set = await separateAndPersistInBrowser(await file.arrayBuffer(), title, source.id, onProgress);
+    const set = await separateAndPersistInBrowser(await file.arrayBuffer(), title, source.id, onProgress, stems);
     return { set, title, persisted: true };
   }
 
@@ -110,7 +171,7 @@ export async function runJob(
     const title = file.name.replace(/\.[^.]+$/, '');
     const bytes = await file.arrayBuffer();
     const ext = file.name.split('.').pop()?.toLowerCase() || 'audio';
-    const set = await separateUpload(backendBaseUrl, bytes, { title, ext }, onProgress);
+    const set = await separateUpload(backendBaseUrl, bytes, { title, ext, stems }, onProgress);
     return { set, title, persisted: true };
   }
 
@@ -119,7 +180,7 @@ export async function runJob(
     onProgress({ phase: 'extracting', percent: 20, message: 'Importing on backend…' });
     const source = await importYouTube(backendBaseUrl, input.url);
     onProgress({ phase: 'extracting', percent: 100, message: `Imported "${source.title}"` });
-    const set = await separateFromSource(backendBaseUrl, source.id, onProgress);
+    const set = await separateFromSource(backendBaseUrl, source.id, onProgress, stems);
     return { set, title: source.title, persisted: true };
   }
 
@@ -127,24 +188,38 @@ export async function runJob(
   const { extractInBrowser } = await import('./engines/extract.web');
   const bytes = await extractInBrowser(input.url, backendBaseUrl, onProgress);
   const title = input.url;
-  const set = await separateUpload(backendBaseUrl, bytes, { title, ext: 'webm' }, onProgress);
+  const set = await separateUpload(backendBaseUrl, bytes, { title, ext: 'webm', stems }, onProgress);
   return { set, title, persisted: true };
 }
 
-/** (Re)separate a source already saved in the library, optionally on the cloud. */
+/**
+ * (Re)separate a source already saved in the library, optionally on the cloud.
+ * With 0 stems selected it skips separation and returns the original audio as a
+ * single unseparated track (`project`); otherwise it returns the stem `set`.
+ */
 export async function splitSavedSource(
   source: SourceMeta,
   backendBaseUrl: string,
   onProgress: (p: ProgressUpdate) => void,
   useCloud = false,
-): Promise<StemSet> {
+  stems?: StemName[],
+): Promise<{ set?: StemSet; project?: EditorProject }> {
+  if (!stems || stems.length === 0) {
+    onProgress({ phase: 'loading-model', percent: 60, message: 'Loading track…' });
+    const bytes = IS_DESKTOP
+      ? await getSourceAudioBytes(backendBaseUrl, source.id)
+      : await store.getSourceBytes(source.id);
+    const audio = await decodeToModelAudio(bytes);
+    onProgress({ phase: 'ready', percent: 100 });
+    return { project: singleTrackProject(audio.channels, audio.sampleRate, source.title) };
+  }
   if (useCloud) {
     const bytes = await store.getSourceBytes(source.id);
-    return cloudSeparateBytes(bytes, source.title, source.id, onProgress);
+    return { set: await cloudSeparateBytes(bytes, source.title, source.id, onProgress, stems) };
   }
   if (!IS_DESKTOP) {
     const bytes = await store.getSourceBytes(source.id);
-    return separateAndPersistInBrowser(bytes, source.title, source.id, onProgress);
+    return { set: await separateAndPersistInBrowser(bytes, source.title, source.id, onProgress, stems) };
   }
-  return separateFromSource(backendBaseUrl, source.id, onProgress);
+  return { set: await separateFromSource(backendBaseUrl, source.id, onProgress, stems) };
 }

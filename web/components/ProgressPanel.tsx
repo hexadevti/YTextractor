@@ -1,6 +1,7 @@
 'use client';
 
 import type { ProgressUpdate } from '@prismaxim/shared';
+import { IS_MOBILE } from '@/lib/env';
 
 const PHASE_LABELS: Record<string, string> = {
   extracting: 'Fetching audio',
@@ -34,7 +35,10 @@ export default function ProgressPanel({
         {isSeparating && (
           <>
             {' '}
-            — this can take several minutes; keep the tab open.
+            — this can take several minutes;{' '}
+            {IS_MOBILE
+              ? 'keep the app open — the screen stays on until it finishes.'
+              : 'keep the tab open.'}
           </>
         )}
       </div>

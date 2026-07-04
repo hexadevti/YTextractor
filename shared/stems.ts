@@ -60,3 +60,18 @@ export const PRESETS: Preset[] = [
 export function getStem(set: StemSet, name: StemName): Stem | undefined {
   return set.stems.find((s) => s.name === name);
 }
+
+/**
+ * Normalise a user stem selection: keep only valid names, in canonical
+ * `STEM_NAMES` order, deduped. An empty/absent selection means "all 6".
+ * Used to keep the separation output order stable regardless of pick order.
+ */
+export function orderStems(selection?: readonly string[] | null): StemName[] {
+  if (!selection || selection.length === 0) return [...STEM_NAMES];
+  return STEM_NAMES.filter((n) => selection.includes(n));
+}
+
+/** Parse a comma-separated stem list (wire header) into ordered valid names. */
+export function parseStemList(csv?: string | null): StemName[] {
+  return orderStems(csv ? csv.split(',').map((s) => s.trim()) : null);
+}

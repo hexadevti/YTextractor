@@ -17,6 +17,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
+import { IS_MOBILE } from '@/lib/env';
 
 export interface ToolbarProps {
   // edit
@@ -79,46 +80,54 @@ export default function Toolbar(p: ToolbarProps) {
         </button>
       </div>
 
-      {/* View */}
+      {/* View — on mobile, zoom/fit is gestural (pinch), so the buttons are hidden. */}
       <div className="tool-group">
-        <button className="btn ghost" onClick={p.onZoomOut} title="Zoom out">
-          <ZoomOut size={15} />
-        </button>
-        <button className="btn ghost" onClick={p.onFit} title="Fit all tracks to view">
-          <Maximize2 size={14} /> Fit
-        </button>
-        <button className="btn ghost" onClick={p.onZoomIn} title="Zoom in">
-          <ZoomIn size={15} />
-        </button>
+        {!IS_MOBILE && (
+          <>
+            <button className="btn ghost" onClick={p.onZoomOut} title="Zoom out">
+              <ZoomOut size={15} />
+            </button>
+            <button className="btn ghost" onClick={p.onFit} title="Fit all tracks to view">
+              <Maximize2 size={14} /> Fit
+            </button>
+            <button className="btn ghost" onClick={p.onZoomIn} title="Zoom in">
+              <ZoomIn size={15} />
+            </button>
+          </>
+        )}
         <button className="btn secondary" onClick={p.onAddTrack} title="Add an empty track">
           <ListPlus size={15} /> Track
         </button>
       </div>
 
-      {/* Analysis */}
-      <div className="tool-group">
-        <button className="btn ghost" onClick={p.onDetectTempo} disabled={p.analyzing !== null}>
-          {p.analyzing === 'tempo' ? 'Detecting…' : <><Timer size={14} /> Detect tempo</>}
-        </button>
-        <button className="btn ghost" onClick={p.onDetectChords} disabled={p.analyzing !== null}>
-          {p.analyzing === 'chords' ? 'Detecting…' : <><Music2 size={14} /> Detect chords</>}
-        </button>
-        <button className="btn ghost" onClick={p.onStats} disabled={p.analyzing !== null}>
-          {p.analyzing === 'stats' ? 'Analyzing…' : <><BarChart3 size={14} /> Stats</>}
-        </button>
-        {p.chordCount > 0 && <span className="hint">{p.chordCount} chords</span>}
-      </div>
+      {/* Analysis — desktop only (tempo/chord/stats detection). */}
+      {!IS_MOBILE && (
+        <div className="tool-group">
+          <button className="btn ghost" onClick={p.onDetectTempo} disabled={p.analyzing !== null}>
+            {p.analyzing === 'tempo' ? 'Detecting…' : <><Timer size={14} /> Detect tempo</>}
+          </button>
+          <button className="btn ghost" onClick={p.onDetectChords} disabled={p.analyzing !== null}>
+            {p.analyzing === 'chords' ? 'Detecting…' : <><Music2 size={14} /> Detect chords</>}
+          </button>
+          <button className="btn ghost" onClick={p.onStats} disabled={p.analyzing !== null}>
+            {p.analyzing === 'stats' ? 'Analyzing…' : <><BarChart3 size={14} /> Stats</>}
+          </button>
+          {p.chordCount > 0 && <span className="hint">{p.chordCount} chords</span>}
+        </div>
+      )}
 
-      {/* Tools (output-audio visualizers) */}
-      <div className="tool-group tool-group-end">
-        <button
-          className={`btn ghost${p.toolsOpen ? ' active' : ''}`}
-          onClick={p.onToggleTools}
-          title="Tools: output-audio visualizers (VU meter, spectrum)"
-        >
-          <PanelRight size={15} /> Tools
-        </button>
-      </div>
+      {/* Tools (output-audio visualizers) — desktop only. */}
+      {!IS_MOBILE && (
+        <div className="tool-group tool-group-end">
+          <button
+            className={`btn ghost${p.toolsOpen ? ' active' : ''}`}
+            onClick={p.onToggleTools}
+            title="Tools: output-audio visualizers (VU meter, spectrum)"
+          >
+            <PanelRight size={15} /> Tools
+          </button>
+        </div>
+      )}
     </div>
   );
 }

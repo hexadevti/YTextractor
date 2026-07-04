@@ -101,7 +101,7 @@ export async function loadProject(
     const decoded = await decodeToModelAudio(await res.arrayBuffer());
     perStemChannels.push(decoded.channels);
   }
-  return stemSetFromChannels(perStemChannels, project.sampleRate);
+  return stemSetFromChannels(perStemChannels, project.sampleRate, names);
 }
 
 /** Persist a browser-separated StemSet to the backend library. */

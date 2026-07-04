@@ -3,7 +3,13 @@
  * 44.1 kHz stereo layout the Demucs model expects.
  */
 
-import { MODEL_CHANNELS, MODEL_SAMPLE_RATE, type StemSet, STEM_NAMES } from '@prismaxim/shared';
+import {
+  MODEL_CHANNELS,
+  MODEL_SAMPLE_RATE,
+  type StemName,
+  type StemSet,
+  STEM_NAMES,
+} from '@prismaxim/shared';
 
 export interface DecodedAudio {
   channels: Float32Array[]; // length MODEL_CHANNELS
@@ -45,11 +51,14 @@ export async function decodeToModelAudio(bytes: ArrayBuffer): Promise<DecodedAud
 
 /**
  * Build a StemSet from per-stem decoded audio (used when the backend returns
- * stems as separate audio files). `order` follows STEM_NAMES.
+ * stems as separate audio files). `names[i]` labels `perStemChannels[i]`; it
+ * defaults to STEM_NAMES (all 6) but must be passed for a partial/reordered set
+ * so each buffer keeps its correct stem name.
  */
 export function stemSetFromChannels(
   perStemChannels: Float32Array[][],
   sampleRate: number,
+  names: readonly StemName[] = STEM_NAMES,
 ): StemSet {
   const length = perStemChannels[0]?.[0]?.length ?? 0;
   const numChannels = perStemChannels[0]?.length ?? MODEL_CHANNELS;
@@ -57,7 +66,7 @@ export function stemSetFromChannels(
     sampleRate,
     length,
     numChannels,
-    stems: STEM_NAMES.map((name, i) => ({
+    stems: names.map((name, i) => ({
       name,
       channels: perStemChannels[i] ?? [],
     })),

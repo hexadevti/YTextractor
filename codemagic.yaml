@@ -1,0 +1,163 @@
+# Codemagic CI/CD — builds the Prismaxim mobile apps (Capacitor) in the cloud.
+#
+# Why Codemagic: iOS must be built on macOS and the maintainer has no Mac, so the
+# iOS workflow runs on a Codemagic macOS instance. Android runs on Linux (cheaper).
+#
+# Both workflows share the same front of the pipeline:
+#   npm install (root workspaces)  ->  npm run build:mobile (Next static export
+#   with BUILD_TARGET=mobile -> web/out)  ->  npx cap sync (copies web/out into
+#   the native project + resolves plugins).
+#
+# NOTE — Capacitor 8 uses Swift Package Manager for iOS (mobile/ios/App has an
+# App.xcodeproj and CapApp-SPM/Package.swift, NO .xcworkspace). So the iOS build
+# targets --project App.xcodeproj, not --workspace. Do not "pod install".
+#
+# ── One-time setup in the Codemagic UI (referenced by name below) ──────────────
+#   • Integration "Prismaxim ASC API Key": App Store Connect API key (.p8, key id,
+#     issuer id) — used for signing + TestFlight upload.
+#   • iOS signing: automatic, distribution app_store, bundle com.prismaxim.app.
+#   • Android keystore reference "prismaxim_keystore" (see android_signing below);
+#     the app build.gradle must consume it (CM_* env or keystore.properties).
+#   • Variable group "prismaxim_build_env": NEXT_PUBLIC_CLOUD_SEPARATE_URL,
+#     NEXT_PUBLIC_CLOUD_TOKEN, and optionally NEXT_PUBLIC_MODEL_URL — injected at
+#     `next build` time so the app knows the cloud separation endpoint. Mark the
+#     token "secure".
+
+workflows:
+  # ───────────────────────────────── iOS ──────────────────────────────────────
+  ios:
+    name: Prismaxim iOS (TestFlight)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: Prismaxim ASC API Key
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.prismaxim.app
+      groups:
+        - prismaxim_build_env
+      vars:
+        XCODE_PROJECT: "mobile/ios/App/App.xcodeproj"
+        XCODE_SCHEME: "App"
+        # Numeric App Store Connect app id (from App Store Connect → App → General).
+        APP_STORE_APPLE_ID: 0000000000
+      node: 22
+      xcode: latest
+    scripts:
+      - name: Install dependencies (root workspaces)
+        script: npm install
+      - name: Build web static export (mobile target)
+        script: npm run build:mobile
+      - name: Capacitor sync iOS
+        script: cd mobile && npx cap sync ios
+      - name: Set up code signing (fetch/create provisioning profiles)
+        script: xcode-project use-profiles
+      - name: Set build number to latest TestFlight + 1
+        script: |
+          BUILD_NUMBER=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID")
+          cd mobile/ios/App
+          agvtool new-version -all $(($BUILD_NUMBER + 1))
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        # Add TestFlight beta groups here once created, e.g.:
+        # beta_groups:
+        #   - Internal Testers
+
+  # ─────────────────────────────── Android ────────────────────────────────────
+  android:
+    name: Prismaxim Android (internal)
+    # linux_x2 is cheaper for Android but Linux is pay-as-you-go (needs a billing
+    # plan). Switch to mac_mini_m2 to run on free-tier macOS minutes instead.
+    instance_type: linux_x2
+    max_build_duration: 60
+    environment:
+      android_signing:
+        - prismaxim_keystore
+      groups:
+        - prismaxim_build_env
+      vars:
+        PACKAGE_NAME: "com.prismaxim.app"
+      node: 22
+      java: 21
+    scripts:
+      - name: Install dependencies (root workspaces)
+        script: npm install
+      - name: Build web static export (mobile target)
+        script: npm run build:mobile
+      - name: Capacitor sync Android
+        script: cd mobile && npx cap sync android
+      - name: Build AAB (Play) + APK (sideload/internal)
+        script: |
+          cd mobile/android
+          chmod +x gradlew
+          ./gradlew bundleRelease assembleRelease
+    artifacts:
+      - mobile/android/app/build/outputs/**/*.aab
+      - mobile/android/app/build/outputs/**/*.apk
+      - mobile/android/app/build/outputs/**/mapping.txt
+    publishing:
+      email:
+        recipients:
+          - lucianobfaria@gmail.com
+        notify:
+          success: true
+          failure: true
+      # Optional — publish the AAB to the Google Play internal track. Configure a
+      # Play service account in Codemagic, then uncomment:
+      # google_play:
+      #   credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+      #   track: internal
+
+  # ───────────────────── Android (debug smoke test) ───────────────────────────
+  # Zero-setup validation of the whole pipeline — no signing, no accounts, no
+  # variable groups. Produces an installable *debug* APK (self-signed with the
+  # Android debug key). Use this for the very first build and to sideload onto an
+  # Android phone for quick manual testing.
+  android-debug:
+    name: Prismaxim Android (debug smoke test)
+    # Codemagic's free tier includes macOS (mac_mini_m2) minutes; Linux/Windows
+    # instances are pay-as-you-go and need a billing plan. macOS builds Android
+    # fine, so use it for the free smoke test.
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      # Injects NEXT_PUBLIC_CLOUD_SEPARATE_URL / NEXT_PUBLIC_CLOUD_TOKEN at build
+      # time so the debug APK defaults to fast cloud separation. Create this group
+      # in the Codemagic UI first (App settings → Environment variables), or the
+      # build fails with "group not found".
+      groups:
+        - prismaxim_build_env
+      node: 22
+      java: 21
+    scripts:
+      - name: Install dependencies (root workspaces)
+        script: npm install
+      - name: Build web static export (mobile target)
+        script: npm run build:mobile
+      - name: Capacitor sync Android
+        script: cd mobile && npx cap sync android
+      - name: Build debug APK
+        script: |
+          cd mobile/android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+    artifacts:
+      - mobile/android/app/build/outputs/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - lucianobfaria@gmail.com
+        notify:
+          success: true
+          failure: true

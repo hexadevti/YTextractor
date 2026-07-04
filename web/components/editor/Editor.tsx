@@ -8,6 +8,7 @@ import {
   ClipboardPaste,
   Copy,
   Download,
+  FolderInput,
   Gauge,
   Hand,
   Magnet,
@@ -90,6 +91,7 @@ import {
   type ToolInstance,
   type ToolKind,
 } from '@/lib/editor/tools';
+import { IS_MOBILE } from '@/lib/env';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const EDGE_PX = 6;
@@ -148,11 +150,17 @@ export default function Editor({
   title,
   onSaved,
   onDirtyChange,
+  onImport,
+  pendingImport,
 }: {
   initialProject: EditorProject;
   title: string;
   onSaved?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  /** Open the import window (wired by the shell). Absent → no Import button. */
+  onImport?: () => void;
+  /** Tracks to append to the live project; `token` changes per import request. */
+  pendingImport?: { tracks: EditorTrack[]; token: number } | null;
 }) {
   const [engine, setEngine] = useState<EditorEngine | null>(null);
   const [project, setProject] = useState<EditorProject>(() => initialProject);
@@ -248,6 +256,9 @@ export default function Editor({
   const rowsRef = useRef<HTMLDivElement>(null);
   const playheadRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef(false);
+  // Mobile: true while a two-finger pinch-zoom is in progress, so the one-finger
+  // pan drag stands down (see the wheel/gesture effect and onLanePointerDown).
+  const pinchingRef = useRef(false);
 
   // Refs mirroring state for use inside window listeners.
   const projectRef = useRef(project);
@@ -266,7 +277,8 @@ export default function Editor({
   engineRef.current = engine;
   metroOnRef.current = metroOn;
   bpmRef.current = bpm;
-  bpmSnapRef.current = bpmSnap;
+  // Beat-snap is desktop-only; force it off on mobile so drag/trim/seek never snap.
+  bpmSnapRef.current = bpmSnap && !IS_MOBILE;
   bpmOffsetSecRef.current = bpmOffsetSec;
   rateRef.current = rate;
   keepPitchRef.current = keepPitch;
@@ -425,6 +437,57 @@ export default function Editor({
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  /* ---------- mobile two-finger pinch-to-zoom ---------- */
+  useEffect(() => {
+    if (!IS_MOBILE) return;
+    const el = timelineRef.current;
+    if (!el) return;
+    const pts = new Map<number, { x: number; y: number }>();
+    let startDist = 0;
+    let startPx = 0;
+    let anchorSec = 0;
+    let midLocalX = 0;
+    const dist = () => {
+      const v = [...pts.values()];
+      return Math.hypot(v[0]!.x - v[1]!.x, v[0]!.y - v[1]!.y);
+    };
+    const onDown = (e: PointerEvent) => {
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) {
+        pinchingRef.current = true;
+        dragRef.current = null; // cancel any in-progress one-finger pan/trim
+        const v = [...pts.values()];
+        const rect = el.getBoundingClientRect();
+        midLocalX = (v[0]!.x + v[1]!.x) / 2 - rect.left - sidebarWidthRef.current;
+        anchorSec = scrollRef.current + midLocalX / pxRef.current;
+        startDist = dist();
+        startPx = pxRef.current;
+      }
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (!pinchingRef.current || pts.size !== 2 || startDist === 0) return;
+      const nextPx = clamp(startPx * (dist() / startDist), 2, 500);
+      setPxPerSec(nextPx);
+      setScrollSec(Math.max(0, anchorSec - midLocalX / nextPx));
+    };
+    const onUp = (e: PointerEvent) => {
+      pts.delete(e.pointerId);
+      if (pts.size < 2) pinchingRef.current = false;
+    };
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
+    return () => {
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+    };
+  }, []);
+
   /* ---------- edit commit + history ---------- */
   const commit = useCallback(
     (next: EditorProject) => {
@@ -438,6 +501,20 @@ export default function Editor({
     },
     [history],
   );
+
+  // Append imported tracks to the live project when the shell requests it (an
+  // "Add to open project" import). The token guards against re-applying on a
+  // StrictMode double-invoke or a remount that still sees the last request.
+  const lastImportToken = useRef(pendingImport?.token ?? 0);
+  useEffect(() => {
+    const token = pendingImport?.token ?? 0;
+    if (!pendingImport || token === lastImportToken.current) return;
+    lastImportToken.current = token;
+    if (!pendingImport.tracks.length) return;
+    const next = cloneProject(projectRef.current);
+    next.tracks.push(...pendingImport.tracks);
+    commit(next);
+  }, [pendingImport, commit]);
 
   const effSelection = useCallback((): Selection => {
     const sel = selectionRef.current;
@@ -847,6 +924,90 @@ export default function Editor({
         startClientX: e.clientX,
         origStart: hit.startSec,
       };
+    } else if (e.button === 0 && IS_MOBILE) {
+      // Mobile one-finger gestures on a lane:
+      //  - press-and-hold on a clip (~350 ms, held still) grabs it → the clip
+      //    follows the finger (horizontal = time, vertical = track) until release;
+      //  - dragging before the hold fires pans the timeline instead;
+      //  - a tap selects the clip under the finger.
+      // Two-finger pinch-zoom is handled separately and stands this down (pinchingRef).
+      const anchorSec = sec;
+      const startClientX = e.clientX;
+      const startClientY = e.clientY;
+      const startScrollTop = rowsRef.current?.scrollTop ?? 0;
+      const tapId = hit?.id ?? null;
+      let moved = false;
+      let mode: 'idle' | 'pan' | 'move' = 'idle';
+      let base = projectRef.current;
+      let groupIds: string[] = [];
+      let origTrackIdx = 0;
+
+      // Long-press → enter clip-move mode (unless the finger already moved/pinched).
+      const enterMove = () => {
+        if (mode !== 'idle' || moved || pinchingRef.current || !hit) return;
+        mode = 'move';
+        base = projectRef.current;
+        const selIds = selectionRef.current.clipIds;
+        const inMulti = selIds.length > 1 && selIds.includes(hit.id);
+        groupIds = inMulti ? selIds : [hit.id];
+        origTrackIdx = projectRef.current.tracks.findIndex((t) => t.id === trackId);
+        if (!inMulti) setSelection({ startSec: 0, endSec: 0, trackIds: [trackId], clipIds: [hit.id] });
+        setDragCursor('move');
+        navigator.vibrate?.(12); // haptic tick to signal "drag mode"
+      };
+      const holdTimer = hit ? window.setTimeout(enterMove, 350) : 0;
+
+      const onMove = (ev: PointerEvent) => {
+        if (pinchingRef.current) {
+          moved = true;
+          window.clearTimeout(holdTimer);
+          return;
+        }
+        const dx = ev.clientX - startClientX;
+        const dy = ev.clientY - startClientY;
+        if (mode === 'move') {
+          // Grabbed clip follows the finger.
+          const dxSec = dx / pxRef.current;
+          const deltaIdx = trackIdxFromY(ev.clientY) - origTrackIdx;
+          const next = moveClips(base, groupIds, dxSec, deltaIdx);
+          projectRef.current = next;
+          setProject(next);
+          engineRef.current?.setProject(next);
+          return;
+        }
+        if (!moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+          moved = true;
+          mode = 'pan'; // early movement = pan; cancel the pending hold
+          window.clearTimeout(holdTimer);
+        }
+        if (mode === 'pan') {
+          const rect = timelineRef.current!.getBoundingClientRect();
+          const lx = ev.clientX - rect.left - sidebarWidthRef.current;
+          setScrollSec(Math.max(0, anchorSec - lx / pxRef.current));
+          if (rowsRef.current) rowsRef.current.scrollTop = startScrollTop - dy;
+        }
+      };
+      const onUp = () => {
+        window.clearTimeout(holdTimer);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        setDragCursor(null);
+        if (mode === 'move') {
+          if (projectRef.current !== base) {
+            history.push(base);
+            forceHistory((n) => n + 1);
+            setDirty(true);
+          }
+          return;
+        }
+        if (!moved && !pinchingRef.current) {
+          if (tapId) setSelection({ startSec: 0, endSec: 0, trackIds: [trackId], clipIds: [tapId] });
+          else setSelection(EMPTY_SELECTION);
+        }
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      return;
     } else if (e.button === 0) {
       // LMB only SELECTS (never moves — move is the middle button). Shift/Ctrl-click
       // toggles a block in the multi-selection; a plain click selects the block under
@@ -1093,11 +1254,13 @@ export default function Editor({
     }
   };
 
-  // Always show the Audio I/O controls: enable devices once the engine is ready
-  // (monitor stays off by default, so nothing is routed until you turn it on).
+  // Desktop: enable the Audio I/O devices once the engine is ready (monitor stays
+  // off by default, so nothing is routed until you turn it on). On mobile we skip
+  // this so the editor doesn't prompt for the mic on open — recording requests
+  // permission on demand (see toggleRecord), and the mic lives in Options.
   const autoEnabledRef = useRef(false);
   useEffect(() => {
-    if (!engine || autoEnabledRef.current) return;
+    if (IS_MOBILE || !engine || autoEnabledRef.current) return;
     autoEnabledRef.current = true;
     void enableDevices().catch(() => {
       autoEnabledRef.current = false; // allow a retry (e.g. after a denied prompt)
@@ -1490,6 +1653,9 @@ export default function Editor({
             </button>
             <span className="hint">{bpm} BPM</span>
           </div>
+          {/* Beat-snap + playback-speed controls are desktop-only. */}
+          {!IS_MOBILE && (
+          <>
           <span className="sep" />
           <label className="dev checkbox" title="Snap ao BPM: gruda cursor e clipes nas batidas">
             <input type="checkbox" checked={bpmSnap} onChange={(e) => setBpmSnap(e.target.checked)} />
@@ -1550,9 +1716,20 @@ export default function Editor({
               </span>
             )}
           </label>
+          </>
+          )}
         </div>
 
         <div className="tp-group tp-right">
+          {onImport && (
+            <button
+              className="btn secondary"
+              onClick={onImport}
+              title="Import audio — as a new project or added to this one"
+            >
+              <FolderInput size={15} /> Import…
+            </button>
+          )}
           <button
             className="btn"
             disabled={exporting !== null}
@@ -1614,20 +1791,24 @@ export default function Editor({
         onToggleTools={() => setToolsOpen((v) => !v)}
       />
 
-      <RecordBar
-        inputs={devices.inputs}
-        outputs={devices.outputs}
-        inputId={inputId}
-        outputId={outputId}
-        onInput={chooseInput}
-        onOutput={chooseOutput}
-        monitor={monitor}
-        onMonitor={setMonitorState}
-        onEnableDevices={enableDevices}
-        devicesReady={devicesReady}
-        outputSupported={supportsOutputSelection()}
-        getLevel={getInputLevel}
-      />
+      {/* Audio I/O bar is desktop-only; on mobile the mic lives in Options and
+          recording requests permission on demand. */}
+      {!IS_MOBILE && (
+        <RecordBar
+          inputs={devices.inputs}
+          outputs={devices.outputs}
+          inputId={inputId}
+          outputId={outputId}
+          onInput={chooseInput}
+          onOutput={chooseOutput}
+          monitor={monitor}
+          onMonitor={setMonitorState}
+          onEnableDevices={enableDevices}
+          devicesReady={devicesReady}
+          outputSupported={supportsOutputSelection()}
+          getLevel={getInputLevel}
+        />
+      )}
 
       <div className="editor-workspace">
       <div className="editor-timeline" ref={timelineRef}>
@@ -1638,7 +1819,7 @@ export default function Editor({
           sidebarWidth={sidebarWidth}
           onPointerDown={onRulerPointerDown}
         />
-        {bpmSnap && (
+        {!IS_MOBILE && bpmSnap && (
           <BeatStrip
             bpm={bpm}
             offsetSec={bpmOffsetSec}
@@ -1648,7 +1829,7 @@ export default function Editor({
             sidebarWidth={sidebarWidth}
           />
         )}
-        {chords.length > 0 && (
+        {!IS_MOBILE && chords.length > 0 && (
           <ChordStrip
             chords={chords}
             pxPerSec={pxPerSec}
@@ -1695,7 +1876,7 @@ export default function Editor({
         </div>
         <div ref={playheadRef} className="editor-playhead" />
       </div>
-        {toolsOpen && (
+        {!IS_MOBILE && toolsOpen && (
           <ToolsPanel
             items={tools}
             sources={[
@@ -1713,16 +1894,20 @@ export default function Editor({
         )}
       </div>
 
-      <Overview
-        project={project}
-        scrollSec={scrollSec}
-        viewportSec={viewportSec}
-        viewportWidth={viewportWidth}
-        onScroll={setScrollSec}
-        onZoom={setPxPerSec}
-      />
+      {/* Overview minimap replaces the horizontal scrollbar — desktop only; on
+          mobile the timeline is panned/zoomed by touch gestures instead. */}
+      {!IS_MOBILE && (
+        <Overview
+          project={project}
+          scrollSec={scrollSec}
+          viewportSec={viewportSec}
+          viewportWidth={viewportWidth}
+          onScroll={setScrollSec}
+          onZoom={setPxPerSec}
+        />
+      )}
 
-      {stats && <StatsPanel stats={stats} onClose={() => setStats(null)} />}
+      {!IS_MOBILE && stats && <StatsPanel stats={stats} onClose={() => setStats(null)} />}
 
       {midiProgress && (
         <div className="midi-overlay">

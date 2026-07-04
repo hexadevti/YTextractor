@@ -16,7 +16,7 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import Fastify from 'fastify';
-import { separateMixture, STEM_NAMES, type SeparationSession, type StemSet } from '@prismaxim/shared';
+import { parseStemList, separateMixture, type SeparationSession, type StemSet } from '@prismaxim/shared';
 import { decodePcm, encodeFlac } from './encode';
 import { createSession } from './runtime';
 
@@ -70,7 +70,7 @@ async function main() {
     reply
       .header('Access-Control-Allow-Origin', '*')
       .header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-      .header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Title, X-Ext')
+      .header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Title, X-Ext, X-Stems')
       .code(204)
       .send();
   });
@@ -89,17 +89,22 @@ async function main() {
     const audio = req.body as Buffer;
     if (!audio || audio.length === 0) return reply.code(400).send('Empty audio body');
 
+    // Optional stem selection: encode/return only these (absent = all 6).
+    const include = parseStemList(req.headers['x-stems'] as string | undefined);
+
     const t0 = Date.now();
     const pcm = await decodePcm(audio);
     const { session, engine } = await getSession();
-    const set = await separateMixture(pcm.channels, session, { overlap: OVERLAP });
+    const set = await separateMixture(pcm.channels, session, { overlap: OVERLAP, include });
     const body = await frameStems(set);
-    app.log.info(`separated ${(audio.length / 1e6).toFixed(1)}MB in ${Date.now() - t0}ms on ${engine}`);
+    app.log.info(
+      `separated ${(audio.length / 1e6).toFixed(1)}MB → ${set.stems.length} stems in ${Date.now() - t0}ms on ${engine}`,
+    );
 
     return reply
       .header('Content-Type', 'application/octet-stream')
       .header('X-Sample-Rate', String(set.sampleRate))
-      .header('X-Stem-Names', STEM_NAMES.join(','))
+      .header('X-Stem-Names', set.stems.map((s) => s.name).join(','))
       .header('X-Engine', engine)
       .send(body);
   });

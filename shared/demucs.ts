@@ -12,7 +12,7 @@
  */
 
 import type { SeparationSession } from './runtime';
-import { STEM_NAMES, type Stem, type StemName, type StemSet } from './stems';
+import { orderStems, STEM_NAMES, type Stem, type StemName, type StemSet } from './stems';
 
 export const MODEL_SAMPLE_RATE = 44100;
 export const MODEL_CHANNELS = 2;
@@ -24,6 +24,17 @@ export interface SeparationOptions {
   overlap?: number;
   /** called after each window with overall progress 0..1 */
   onProgress?: (fraction: number) => void;
+  /**
+   * Which stems to produce (subset of the 6). Absent/empty = all 6.
+   *
+   * The model always runs a full 6-source inference — it can't emit fewer — so
+   * this does NOT speed up the neural net. It skips the overlap-add
+   * accumulation, de-normalisation and output buffers for the unselected
+   * sources, which meaningfully cuts peak memory on long tracks (each stem is a
+   * full-length Float32 buffer per channel) and lets callers encode/transfer
+   * only what the user asked for.
+   */
+  include?: readonly StemName[];
 }
 
 /** Triangular window used to cross-fade overlapping segments (peak in centre). */
@@ -84,12 +95,19 @@ export async function separateMixture(
   const weights = triangularWeights(segLen);
   const numSources = STEM_NAMES.length;
 
-  // Accumulators for weighted overlap-add: out[source][channel] and summed weights.
-  const out: Float32Array[][] = [];
-  for (let s = 0; s < numSources; s++) {
+  // Which of the 6 sources to keep, as model-output indices in canonical order.
+  // The inference below still computes all 6 (the model can't emit fewer); we
+  // simply don't allocate/accumulate the ones the caller didn't ask for.
+  const wanted = orderStems(opts.include);
+  const selected = STEM_NAMES.map((_, s) => s).filter((s) => wanted.includes(STEM_NAMES[s]!));
+
+  // Accumulators for weighted overlap-add: out[source][channel] and summed
+  // weights. Only selected sources get buffers (others stay null and are skipped).
+  const out: (Float32Array[] | null)[] = new Array(numSources).fill(null);
+  for (const s of selected) {
     const perChannel: Float32Array[] = [];
     for (let ch = 0; ch < numChannels; ch++) perChannel.push(new Float32Array(total));
-    out.push(perChannel);
+    out[s] = perChannel;
   }
   const weightSum = new Float32Array(total);
 
@@ -117,9 +135,10 @@ export async function separateMixture(
     const o = result.data; // [1, sources, channels, segLen] row-major
     const srcStride = numChannels * segLen;
 
-    for (let s = 0; s < numSources; s++) {
+    for (const s of selected) {
+      const perChannel = out[s]!;
       for (let ch = 0; ch < numChannels; ch++) {
-        const acc = out[s]![ch]!;
+        const acc = perChannel[ch]!;
         const base = s * srcStride + ch * segLen;
         for (let i = 0; i < valid; i++) {
           const weight = weights[i]!;
@@ -136,13 +155,15 @@ export async function separateMixture(
   // Divide by accumulated weights to finish the overlap-add.
   for (let i = 0; i < total; i++) {
     const denom = weightSum[i]! || 1;
-    for (let s = 0; s < numSources; s++) {
-      for (let ch = 0; ch < numChannels; ch++) out[s]![ch]![i]! /= denom;
+    for (const s of selected) {
+      const perChannel = out[s]!;
+      for (let ch = 0; ch < numChannels; ch++) perChannel[ch]![i]! /= denom;
     }
   }
 
-  const stems: Stem[] = STEM_NAMES.map((name: StemName, s: number) => ({
-    name,
+  // Emit only the selected stems, in canonical STEM_NAMES order.
+  const stems: Stem[] = selected.map((s) => ({
+    name: STEM_NAMES[s]!,
     channels: out[s]!,
   }));
 

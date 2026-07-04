@@ -18,6 +18,12 @@ export interface JobConfig {
   separation: SeparationEngine;
   /** Base URL of the optional Node backend, e.g. http://localhost:8787 */
   backendBaseUrl: string;
+  /**
+   * Which stems to produce (subset of the 6). Absent/empty means all 6.
+   * Threaded to every engine (browser / backend / cloud); see
+   * SeparationOptions.include for how it maps onto the model output.
+   */
+  stems?: StemName[];
 }
 
 export type JobPhase =

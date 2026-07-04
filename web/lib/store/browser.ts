@@ -21,7 +21,7 @@ import {
   type StemSet,
 } from '@prismaxim/shared';
 import { decodeToModelAudio, stemSetFromChannels } from '../audio';
-import { encodeWav } from '../mixer/export';
+import { encodeWav, encodeWavFromChannels } from '../mixer/export';
 import {
   deserializeManifest,
   serialize,
@@ -92,7 +92,9 @@ async function idbDelete(store: StoreName, id: string): Promise<void> {
 
 async function opfsRoot(): Promise<FileSystemDirectoryHandle> {
   if (!navigator.storage?.getDirectory) {
-    throw new Error('This browser has no OPFS storage. Use Chrome or Edge.');
+    // OPFS is available in Chrome/Edge and in modern mobile WebViews (iOS 16.4+,
+    // Android Chromium 108+). Keep the message platform-neutral.
+    throw new Error('This device has no local file storage (OPFS) available for the library.');
   }
   return navigator.storage.getDirectory();
 }
@@ -230,7 +232,10 @@ export const browserStore: LibraryStore = {
         percent: Math.round(((i + 1) / set.stems.length) * 100),
         message: `Saving ${stem.name}…`,
       });
-      const wav = encodeWav(makeAudioBuffer(stem.channels, set.sampleRate));
+      // Encode straight from the stem's Float32 channels — building an
+      // intermediate AudioBuffer here would hold a second full-length copy of
+      // the stem in memory during the save (costly on low-RAM mobile devices).
+      const wav = encodeWavFromChannels(stem.channels, set.sampleRate);
       await writeOpfs(`projects/${id}/${stem.name}.wav`, await wav.arrayBuffer());
     }
     const project: ProjectMeta = {
@@ -263,7 +268,7 @@ export const browserStore: LibraryStore = {
       const decoded = await decodeToModelAudio(bytes);
       perStemChannels.push(decoded.channels);
     }
-    return stemSetFromChannels(perStemChannels, project.sampleRate);
+    return stemSetFromChannels(perStemChannels, project.sampleRate, names);
   },
 
   async deleteProject(id) {

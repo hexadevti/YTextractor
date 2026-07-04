@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { PRESETS, STEM_NAMES, type StemSet } from '@prismaxim/shared';
+import { PRESETS, type StemSet } from '@prismaxim/shared';
 import { MixerEngine } from '@/lib/mixer/engine';
 import { downloadBlob, encodeMp3, encodeWav, renderMix } from '@/lib/mixer/export';
 import { saveBrowserProject } from '@/lib/library';
@@ -144,7 +144,8 @@ export default function Mixer({
 
       <div className="mixer-toolbar">
         <span className="hint">Presets:</span>
-        {PRESETS.map((p) => (
+        {/* Only show presets whose muted stems are actually present in this set. */}
+        {PRESETS.filter((p) => p.muted.every((m) => set.stems.some((s) => s.name === m))).map((p) => (
           <button key={p.id} className="btn secondary" onClick={() => engine.applyPreset(p.muted)}>
             {p.label}
           </button>
@@ -169,8 +170,8 @@ export default function Mixer({
         </button>
       </div>
 
-      {STEM_NAMES.map((name) => (
-        <Track key={name} engine={engine} name={name} playing={playing} />
+      {set.stems.map((stem) => (
+        <Track key={stem.name} engine={engine} name={stem.name} playing={playing} />
       ))}
 
       <div className="row" style={{ marginTop: 14 }}>

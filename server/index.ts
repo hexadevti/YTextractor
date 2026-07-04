@@ -17,6 +17,8 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import {
+  orderStems,
+  parseStemList,
   separateMixture,
   STEM_NAMES,
   type SeparateEvent,
@@ -76,7 +78,7 @@ function getSession(): Promise<SeparationSession> {
 async function runSeparation(
   job: Job,
   audio: Buffer,
-  meta: { title: string; sourceId?: string },
+  meta: { title: string; sourceId?: string; stems?: StemName[] },
 ) {
   try {
     setState(job, { phase: 'extracting', percent: 100, message: 'Decoding audio…' });
@@ -93,6 +95,7 @@ async function runSeparation(
     const overlap = Math.min(Math.max(Number(process.env.SEPARATION_OVERLAP ?? 0.1), 0), 0.9);
     const set = await separateMixture(pcm.channels, session, {
       overlap,
+      include: meta.stems,
       onProgress: (f) =>
         setState(job, { phase: 'separating', percent: Math.round(f * 100), engine }),
     });
@@ -117,7 +120,7 @@ async function runSeparation(
       phase: 'ready',
       percent: 100,
       engine,
-      stems: STEM_NAMES as unknown as StemName[],
+      stems: set.stems.map((s) => s.name),
       sampleRate: set.sampleRate,
       projectId,
     });
@@ -343,9 +346,12 @@ async function main() {
     let audio: Buffer;
     let title = 'audio';
     let sourceId: string | undefined;
+    // Optional stem selection: JSON body `stems` (source) or `X-Stems` header
+    // (upload). orderStems() normalises/validates; empty means all 6.
+    let stems: StemName[] = [...orderStems()];
 
     if (ct.includes('application/json')) {
-      const body = parseJson<{ sourceId: string }>(req.body);
+      const body = parseJson<{ sourceId: string; stems?: string[] }>(req.body);
       if (!body?.sourceId) return reply.code(400).send('Missing sourceId');
       const bytes = await readSourceBytes(body.sourceId);
       if (!bytes) return reply.code(404).send('Unknown source');
@@ -353,6 +359,7 @@ async function main() {
       audio = bytes;
       sourceId = body.sourceId;
       title = src?.meta.title ?? 'audio';
+      stems = orderStems(body.stems);
     } else {
       audio = req.body as Buffer;
       if (!audio || audio.length === 0) return reply.code(400).send('Empty audio body');
@@ -361,6 +368,7 @@ async function main() {
         (req.headers['x-title'] as string) || 'Uploaded audio',
       );
       const ext = ((req.headers['x-ext'] as string) || 'audio').toLowerCase();
+      stems = parseStemList(req.headers['x-stems'] as string | undefined);
       const src = await saveSource({
         bytes: audio,
         title: uploadTitle,
@@ -379,7 +387,7 @@ async function main() {
     };
     job.emitter.setMaxListeners(0);
     jobs.set(job.id, job);
-    void runSeparation(job, audio, { title, sourceId });
+    void runSeparation(job, audio, { title, sourceId, stems });
     return reply.send({ jobId: job.id });
   });
 

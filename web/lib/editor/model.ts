@@ -113,6 +113,43 @@ export function fromStemSet(set: StemSet): EditorProject {
   return { tracks, sampleRate: set.sampleRate, numChannels: set.numChannels };
 }
 
+/**
+ * Wrap a single decoded mixture as a one-track editor project — used when the
+ * user asks for no separation (0 stems selected): the original audio comes in as
+ * a single unseparated track (no `stem`, so presets don't touch it).
+ */
+export function singleTrackProject(
+  channels: Float32Array[],
+  sampleRate: number,
+  name: string,
+): EditorProject {
+  const durationSec = (channels[0]?.length ?? 0) / sampleRate;
+  return {
+    sampleRate,
+    numChannels: Math.max(1, channels.length),
+    tracks: [
+      {
+        id: uid(),
+        name: name || 'Original',
+        color: '#64748b',
+        clips: [
+          {
+            id: uid(),
+            buffer: makeAudioBuffer(channels, sampleRate),
+            startSec: 0,
+            offsetSec: 0,
+            durationSec,
+          },
+        ],
+        muted: false,
+        soloed: false,
+        volume: 1,
+        armed: false,
+      },
+    ],
+  };
+}
+
 /** An empty editor project (no tracks) — the base state before anything is loaded. */
 export function emptyProject(): EditorProject {
   return { tracks: [], sampleRate: 44100, numChannels: 2 };

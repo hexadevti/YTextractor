@@ -3,7 +3,7 @@
  * feeds it decoded audio, relays progress, and resolves with a StemSet.
  */
 
-import type { ProgressUpdate, StemSet } from '@prismaxim/shared';
+import type { ProgressUpdate, StemName, StemSet } from '@prismaxim/shared';
 import type { DecodedAudio } from '../audio';
 import { MODEL_CACHE, MODEL_URL } from '../config';
 import type { RunMessage, WorkerOut } from './separation.worker';
@@ -11,6 +11,7 @@ import type { RunMessage, WorkerOut } from './separation.worker';
 export function separateInBrowser(
   audio: DecodedAudio,
   onProgress: (p: ProgressUpdate) => void,
+  stems?: StemName[],
 ): Promise<StemSet> {
   return new Promise<StemSet>((resolve, reject) => {
     const worker = new Worker(new URL('./separation.worker.ts', import.meta.url), {
@@ -49,6 +50,7 @@ export function separateInBrowser(
       modelUrl: MODEL_URL,
       cacheName: MODEL_CACHE,
       overlap: 0.25,
+      stems,
     };
     // Transfer the PCM buffers to avoid a copy.
     worker.postMessage(msg, channels.map((c) => c.buffer));

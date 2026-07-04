@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Mic } from 'lucide-react';
 import { checkBackend } from '@/lib/engines/client';
 import { checkCloud } from '@/lib/engines/cloud';
 import { getCloudUrl } from '@/lib/cloudConfig';
 import { getDesktopBridge, type UpdateStatus } from '@/lib/desktop';
-import { IS_DESKTOP } from '@/lib/env';
+import { IS_DESKTOP, IS_MOBILE } from '@/lib/env';
+import { requestPermission } from '@/lib/editor/devices';
 import { store } from '@/lib/store';
 
 function fmtBytes(n: number): string {
@@ -48,6 +50,19 @@ function CloudOptions() {
       </p>
     </div>
   );
+}
+
+/** Turn electron-updater's verbose errors (HTTP headers, stack traces) into one readable line. */
+function friendlyUpdateError(raw: string): string {
+  const s = raw ?? '';
+  if (/latest\.yml/i.test(s) || /Cannot find .*release/i.test(s))
+    return 'The latest release doesn’t include update information yet — this clears once a newer version is published with auto-update support.';
+  if (/ENOTFOUND|getaddrinfo|ETIMEDOUT|net::|ECONNREFUSED|EAI_AGAIN/i.test(s))
+    return 'Couldn’t reach GitHub. Check your internet connection and try again.';
+  if (/rate limit/i.test(s)) return 'GitHub rate limit reached. Please try again in a few minutes.';
+  // Fallback: first line only, capped so a raw dump never floods the panel.
+  const first = (s.split('\n')[0] ?? '').trim();
+  return first.length > 160 ? `${first.slice(0, 160)}…` : first || 'Update check failed.';
 }
 
 /** Desktop only: check GitHub for a new release and update in one click. */
@@ -138,7 +153,7 @@ function UpdateSection() {
 
       {state.status === 'error' && (
         <>
-          <p className="err">{state.error}</p>
+          <p className="err">{friendlyUpdateError(state.error)}</p>
           <button className="btn secondary" onClick={check} style={{ marginTop: 10 }}>
             Try again
           </button>
@@ -198,6 +213,40 @@ function DesktopOptions({
   );
 }
 
+/** Mobile: microphone permission for editor recording. On mobile the audio I/O
+ *  lives here (device/output selection isn't available in a WebView), so the
+ *  editor's Audio I/O bar is hidden and recording asks for the mic on demand. */
+function MicOptions() {
+  const [state, setState] = useState<'idle' | 'checking' | 'granted' | 'denied'>('idle');
+  const enable = async () => {
+    setState('checking');
+    try {
+      const stream = await requestPermission();
+      stream?.getTracks().forEach((t) => t.stop());
+      setState(stream ? 'granted' : 'denied');
+    } catch {
+      setState('denied');
+    }
+  };
+  return (
+    <div className="field">
+      <label>Audio input (microphone)</label>
+      <p className={state === 'denied' ? 'err' : 'hint'} style={{ marginTop: 6, marginBottom: 8 }}>
+        {state === 'granted'
+          ? '✓ Microphone enabled — you can record tracks in the editor.'
+          : state === 'denied'
+            ? '✗ Microphone blocked. Allow it in your device settings, then try again.'
+            : 'Grant microphone access to record audio tracks in the editor.'}
+      </p>
+      {state !== 'granted' && (
+        <button className="btn secondary" onClick={enable} disabled={state === 'checking'}>
+          <Mic size={15} /> {state === 'checking' ? 'Requesting…' : 'Enable microphone'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Web: 100% in-browser — report engine + local storage usage. */
 function WebOptions() {
   const [usage, setUsage] = useState<{ usage: number; quota: number } | null>(null);
@@ -211,27 +260,33 @@ function WebOptions() {
   return (
     <div className="panel">
       <h2>Options</h2>
-      <div className="field">
-        <label>Separation engine</label>
-        <p className={hasWebGPU === false ? 'warn' : 'hint'} style={{ marginTop: 6 }}>
-          {hasWebGPU === null
-            ? 'Runs in your browser.'
-            : hasWebGPU
-              ? '✓ WebGPU — fast in-browser separation.'
-              : '⚠ WebGPU unavailable — falls back to WASM (much slower). Use Chrome/Edge.'}
-        </p>
-      </div>
+      {/* WebGPU only applies to the pure-web build; a mobile WebView has none. */}
+      {!IS_MOBILE && (
+        <div className="field">
+          <label>Separation engine</label>
+          <p className={hasWebGPU === false ? 'warn' : 'hint'} style={{ marginTop: 6 }}>
+            {hasWebGPU === null
+              ? 'Runs in your browser.'
+              : hasWebGPU
+                ? '✓ WebGPU — fast in-browser separation.'
+                : '⚠ WebGPU unavailable — falls back to WASM (much slower). Use Chrome/Edge.'}
+          </p>
+        </div>
+      )}
       <div className="field">
         <label>Local storage</label>
         <p className="hint" style={{ marginTop: 6 }}>
           {usage
             ? `Using ${fmtBytes(usage.usage)}${usage.quota ? ` of ~${fmtBytes(usage.quota)} available` : ''}.`
-            : 'Your library (songs, stems, edited projects) is saved in this browser.'}
+            : 'Your library (songs, stems, edited projects) is saved on this device.'}
         </p>
       </div>
-      <p className="hint">
-        Everything runs locally — no server. Audio never leaves your machine. Best in Chrome/Edge.
-      </p>
+      {IS_MOBILE && <MicOptions />}
+      {!IS_MOBILE && (
+        <p className="hint">
+          Everything runs locally — no server. Audio never leaves your machine. Best in Chrome/Edge.
+        </p>
+      )}
       <CloudOptions />
     </div>
   );

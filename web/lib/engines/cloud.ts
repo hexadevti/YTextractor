@@ -82,12 +82,15 @@ export async function separateOnCloud(
   token: string,
   audioBytes: ArrayBuffer,
   onProgress: (p: ProgressUpdate) => void,
+  include?: StemName[],
 ): Promise<StemSet> {
   const url = `${baseUrl.replace(/\/$/, '')}/separate`;
   onProgress({ phase: 'separating', percent: 0, message: 'Separating on cloud…', engine: 'cloud' });
 
   const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
+  // Ask the service to encode/return only these stems (saves FLAC encode + bandwidth).
+  if (include && include.length) headers['X-Stems'] = include.join(',');
 
   const res = await fetch(url, { method: 'POST', headers, body: audioBytes });
   if (!res.ok) {
