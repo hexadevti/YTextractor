@@ -77,6 +77,8 @@ workflows:
   # ─────────────────────────────── Android ────────────────────────────────────
   android:
     name: Prismaxim Android (internal)
+    # linux_x2 is cheaper for Android but Linux is pay-as-you-go (needs a billing
+    # plan). Switch to mac_mini_m2 to run on free-tier macOS minutes instead.
     instance_type: linux_x2
     max_build_duration: 60
     environment:
@@ -124,7 +126,10 @@ workflows:
   # Android phone for quick manual testing.
   android-debug:
     name: Prismaxim Android (debug smoke test)
-    instance_type: linux_x2
+    # Codemagic's free tier includes macOS (mac_mini_m2) minutes; Linux/Windows
+    # instances are pay-as-you-go and need a billing plan. macOS builds Android
+    # fine, so use it for the free smoke test.
+    instance_type: mac_mini_m2
     max_build_duration: 45
     environment:
       node: 20
