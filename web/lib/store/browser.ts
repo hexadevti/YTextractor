@@ -92,7 +92,9 @@ async function idbDelete(store: StoreName, id: string): Promise<void> {
 
 async function opfsRoot(): Promise<FileSystemDirectoryHandle> {
   if (!navigator.storage?.getDirectory) {
-    throw new Error('This browser has no OPFS storage. Use Chrome or Edge.');
+    // OPFS is available in Chrome/Edge and in modern mobile WebViews (iOS 16.4+,
+    // Android Chromium 108+). Keep the message platform-neutral.
+    throw new Error('This device has no local file storage (OPFS) available for the library.');
   }
   return navigator.storage.getDirectory();
 }

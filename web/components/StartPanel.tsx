@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { ExtractionEngine, JobConfig, SeparationEngine } from '@prismaxim/shared';
 import { checkBackend } from '@/lib/engines/client';
-import { IS_DESKTOP } from '@/lib/env';
+import { IS_DESKTOP, IS_MOBILE } from '@/lib/env';
 import { cloudConfigured } from '@/lib/cloudConfig';
 import { addToHistory, getHistory, removeFromHistory, type HistoryEntry } from '@/lib/history';
 
@@ -50,8 +50,10 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
   // Web build: report the browser separation engine so the user knows what to expect.
   const [hasWebGPU, setHasWebGPU] = useState<boolean | null>(null);
   // Optional cloud "fast mode": shown only when a cloud endpoint is configured.
+  // On mobile the WebView has no WebGPU and no WASM threads, so cloud is the
+  // default — on-device separation is an experimental fallback (see Options).
   const [hasCloud, setHasCloud] = useState(false);
-  const [useCloud, setUseCloud] = useState(false);
+  const [useCloud, setUseCloud] = useState(IS_MOBILE);
 
   // Load link history on mount (client-only).
   useEffect(() => {
@@ -59,7 +61,9 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
   }, []);
 
   useEffect(() => {
-    if (!IS_DESKTOP) setHasWebGPU(typeof navigator !== 'undefined' && !!navigator.gpu);
+    // WebGPU capability only matters for the pure-web build; a mobile WebView
+    // never exposes navigator.gpu, so don't surface a misleading message there.
+    if (!IS_DESKTOP && !IS_MOBILE) setHasWebGPU(typeof navigator !== 'undefined' && !!navigator.gpu);
     setHasCloud(cloudConfigured());
   }, []);
 
@@ -222,7 +226,10 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
             value={useCloud ? 'cloud' : 'local'}
             onChange={(v) => setUseCloud(v === 'cloud')}
             options={[
-              { value: 'local', label: IS_DESKTOP ? 'Local (native)' : 'Local (WASM)' },
+              {
+                value: 'local',
+                label: IS_DESKTOP ? 'Local (native)' : IS_MOBILE ? 'On-device (beta)' : 'Local (WASM)',
+              },
               { value: 'cloud', label: 'Cloud (fast)' },
             ]}
           />
@@ -244,6 +251,12 @@ export default function StartPanel({ onStart, backendUrl }: StartPanelProps) {
             : backendUp
               ? '✓ Separation service ready'
               : '✗ Separation service not reachable — check the URL in Options.'}
+        </p>
+      ) : IS_MOBILE ? (
+        <p className="warn" style={{ marginTop: 16, marginBottom: 12 }}>
+          {hasCloud
+            ? '⚡ Cloud is recommended on mobile. On-device (beta) runs single-threaded — slow and may fail on long tracks.'
+            : '⚠ On-device (beta) separation is slow and memory-heavy. Set a cloud endpoint in Options for fast, reliable results.'}
         </p>
       ) : (
         <p

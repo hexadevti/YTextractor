@@ -7,6 +7,7 @@
 
 import { Mp3Encoder } from '@breezystack/lamejs';
 import type { MixerEngine } from './engine';
+import { saveOrShare } from '../platform/save';
 
 /** Render the audible channels down to a single AudioBuffer. */
 export async function renderMix(engine: MixerEngine): Promise<AudioBuffer> {
@@ -108,14 +109,13 @@ export function encodeMp3(buffer: AudioBuffer, kbps = 192): Blob {
   return new Blob(chunks as BlobPart[], { type: 'audio/mpeg' });
 }
 
-/** Trigger a browser download for a Blob. */
+/**
+ * Save a Blob to the device. Browser download on web/desktop; native share sheet
+ * on mobile (see lib/platform/save.ts). Kept as a `void` helper so all existing
+ * export/download call sites stay unchanged; failures are logged, not thrown.
+ */
 export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  void saveOrShare(blob, filename).catch((err) => {
+    console.error('Save/share failed:', err);
+  });
 }

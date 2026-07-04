@@ -11,7 +11,7 @@
  */
 
 import type { JobConfig, ProgressUpdate, SourceMeta, StemSet } from '@prismaxim/shared';
-import { IS_DESKTOP } from './env';
+import { IS_DESKTOP, IS_MOBILE } from './env';
 import { decodeToModelAudio } from './audio';
 import { separateInBrowser } from './engines/separation.web';
 import { separateOnCloud } from './engines/cloud';
@@ -92,10 +92,14 @@ export async function runJob(
     return { set, title, persisted: true };
   }
 
-  /* ---------- Web build: 100% browser, upload only ---------- */
+  /* ---------- Web / mobile build: 100% browser, upload only ---------- */
   if (!IS_DESKTOP) {
     if (input.kind !== 'file' || !file) {
-      throw new Error('The web version imports audio files only. YouTube import needs the desktop app.');
+      throw new Error(
+        IS_MOBILE
+          ? 'The mobile app imports audio files only.'
+          : 'The web version imports audio files only. YouTube import needs the desktop app.',
+      );
     }
     const title = file.name.replace(/\.[^.]+$/, '');
     // Persist the original upload as a source (so it can be re-split later).

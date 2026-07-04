@@ -6,13 +6,16 @@
   "workspaces": [
     "shared",
     "web",
-    "server"
+    "server",
+    "mobile"
   ],
   "scripts": {
     "dev:web": "npm run dev -w web",
     "dev:server": "npm run dev -w server",
     "dev:server:debug": "node --import tsx --inspect server/index.ts",
     "build": "npm run build -w shared && npm run build -w web",
+    "build:mobile": "npm run build -w shared && npm run build:mobile -w web",
+    "sync:mobile": "npm run build:mobile && npm run sync -w mobile",
     "lint": "npm run lint -w web"
   },
   "engines": {
