@@ -50,6 +50,19 @@ function CloudOptions() {
   );
 }
 
+/** Turn electron-updater's verbose errors (HTTP headers, stack traces) into one readable line. */
+function friendlyUpdateError(raw: string): string {
+  const s = raw ?? '';
+  if (/latest\.yml/i.test(s) || /Cannot find .*release/i.test(s))
+    return 'The latest release doesn’t include update information yet — this clears once a newer version is published with auto-update support.';
+  if (/ENOTFOUND|getaddrinfo|ETIMEDOUT|net::|ECONNREFUSED|EAI_AGAIN/i.test(s))
+    return 'Couldn’t reach GitHub. Check your internet connection and try again.';
+  if (/rate limit/i.test(s)) return 'GitHub rate limit reached. Please try again in a few minutes.';
+  // Fallback: first line only, capped so a raw dump never floods the panel.
+  const first = (s.split('\n')[0] ?? '').trim();
+  return first.length > 160 ? `${first.slice(0, 160)}…` : first || 'Update check failed.';
+}
+
 /** Desktop only: check GitHub for a new release and update in one click. */
 function UpdateSection() {
   const bridge = getDesktopBridge();
@@ -138,7 +151,7 @@ function UpdateSection() {
 
       {state.status === 'error' && (
         <>
-          <p className="err">{state.error}</p>
+          <p className="err">{friendlyUpdateError(state.error)}</p>
           <button className="btn secondary" onClick={check} style={{ marginTop: 10 }}>
             Try again
           </button>
