@@ -87,7 +87,7 @@ workflows:
       vars:
         PACKAGE_NAME: "com.prismaxim.app"
       node: 20
-      java: 17
+      java: 21
     scripts:
       - name: Install dependencies (root workspaces)
         script: npm install
@@ -98,6 +98,7 @@ workflows:
       - name: Build AAB (Play) + APK (sideload/internal)
         script: |
           cd mobile/android
+          chmod +x gradlew
           ./gradlew bundleRelease assembleRelease
     artifacts:
       - mobile/android/app/build/outputs/**/*.aab
@@ -115,3 +116,37 @@ workflows:
       # google_play:
       #   credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
       #   track: internal
+
+  # ───────────────────── Android (debug smoke test) ───────────────────────────
+  # Zero-setup validation of the whole pipeline — no signing, no accounts, no
+  # variable groups. Produces an installable *debug* APK (self-signed with the
+  # Android debug key). Use this for the very first build and to sideload onto an
+  # Android phone for quick manual testing.
+  android-debug:
+    name: Prismaxim Android (debug smoke test)
+    instance_type: linux_x2
+    max_build_duration: 45
+    environment:
+      node: 20
+      java: 21
+    scripts:
+      - name: Install dependencies (root workspaces)
+        script: npm install
+      - name: Build web static export (mobile target)
+        script: npm run build:mobile
+      - name: Capacitor sync Android
+        script: cd mobile && npx cap sync android
+      - name: Build debug APK
+        script: |
+          cd mobile/android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+    artifacts:
+      - mobile/android/app/build/outputs/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - lucianobfaria@gmail.com
+        notify:
+          success: true
+          failure: true
