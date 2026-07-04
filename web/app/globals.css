@@ -1872,7 +1872,7 @@ body.drag-trim * {
    desktop window keeps the full editor — mirrors the IS_MOBILE gating in JS. */
 
 /* Collapsible "More…" row holding the tools kept out of the compact transport. */
-.editor-more {
+.is-mobile .editor-more {
   display: flex;
   align-items: center;
   gap: 8px;
