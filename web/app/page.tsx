@@ -8,15 +8,18 @@ import type {
   ProgressUpdate,
   ProjectMeta,
   SourceMeta,
+  StemSet,
 } from '@prismaxim/shared';
 import StartPanel from '@/components/StartPanel';
 import LibraryPanel from '@/components/LibraryPanel';
 import OptionsPanel from '@/components/OptionsPanel';
 import ProgressPanel from '@/components/ProgressPanel';
 import Editor from '@/components/editor/Editor';
+import Mixer from '@/components/Mixer';
 import { runJob, splitSavedSource } from '@/lib/pipeline';
 import { store } from '@/lib/store';
 import { emptyProject, fromStemSet, type EditorProject } from '@/lib/editor/model';
+import { IS_MOBILE } from '@/lib/env';
 import { DEFAULT_BACKEND_URL } from '@/lib/config';
 
 type View = 'import' | 'library' | 'options';
@@ -25,12 +28,20 @@ const TITLES: Record<View, string> = { import: 'Import', library: 'Library', opt
 interface Loaded {
   project: EditorProject;
   title: string;
+  /** The raw 6-stem set, present for fresh splits and saved projects (drives the
+   *  mobile quick-mixer). Absent for arrangements, which need the full editor. */
+  set?: StemSet;
 }
 
 export default function Home() {
   const [modal, setModal] = useState<View | null>('import');
   const [project, setProject] = useState<EditorProject>(() => emptyProject());
   const [title, setTitle] = useState('Untitled');
+  // Mobile lands in a simple faders mixer after a split; the full DAW editor is
+  // opt-in via a toggle. `stemSet` holds the raw split for the mixer (null once an
+  // arrangement — which the mixer can't represent — is loaded).
+  const [stemSet, setStemSet] = useState<StemSet | null>(null);
+  const [mobileEdit, setMobileEdit] = useState(false);
   const [sessionId, setSessionId] = useState(0);
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [reloadKey, setReloadKey] = useState(0);
@@ -86,6 +97,8 @@ export default function Home() {
   const loadIntoEditor = useCallback((loaded: Loaded) => {
     setProject(loaded.project);
     setTitle(loaded.title);
+    setStemSet(loaded.set ?? null);
+    setMobileEdit(false); // default to the mixer view on mobile after a load
     setSessionId((s) => s + 1);
     dirtyRef.current = false;
     setJob({ running: false });
@@ -121,7 +134,7 @@ export default function Home() {
     (config: JobConfig, file: File | null) =>
       runInModal(async () => {
         const { set, title: t } = await runJob(config, file, onProgress);
-        return { project: fromStemSet(set), title: t };
+        return { project: fromStemSet(set), title: t, set };
       }),
     [runInModal, onProgress],
   );
@@ -130,7 +143,7 @@ export default function Home() {
     (source: SourceMeta, useCloud = false) =>
       runInModal(async () => {
         const set = await splitSavedSource(source, backendUrl, onProgress, useCloud);
-        return { project: fromStemSet(set), title: source.title };
+        return { project: fromStemSet(set), title: source.title, set };
       }),
     [runInModal, backendUrl, onProgress],
   );
@@ -139,7 +152,7 @@ export default function Home() {
     (p: ProjectMeta) =>
       runInModal(async () => {
         const set = await store.loadProject(p, onProgress);
-        return { project: fromStemSet(set), title: p.title };
+        return { project: fromStemSet(set), title: p.title, set };
       }),
     [runInModal, onProgress],
   );
@@ -193,12 +206,23 @@ export default function Home() {
     return <OptionsPanel backendUrl={backendUrl} onBackendUrlChange={setBackendUrl} />;
   }
 
+  // On mobile, a completed split shows the simple faders mixer; the full DAW
+  // editor is opt-in. Desktop always uses the editor.
+  const showMixer = IS_MOBILE && !!stemSet && !mobileEdit;
+
   return (
     <div className="app-shell">
       {/* Floating hamburger — only visible on small screens (see globals.css). */}
       <button className="mobile-nav-open" onClick={toggleNav} aria-label="Open menu">
         <Menu size={20} />
       </button>
+
+      {/* Mobile-only toggle between the quick mixer and the full editor. */}
+      {IS_MOBILE && stemSet && (
+        <button className="mobile-view-toggle" onClick={() => setMobileEdit((e) => !e)}>
+          {mobileEdit ? '◂ Mixer' : 'Editor ▸'}
+        </button>
+      )}
 
       {/* Backdrop behind the mobile drawer; tapping it closes the drawer. */}
       {navOpen && <div className="drawer-backdrop" onClick={toggleNav} />}
@@ -246,19 +270,23 @@ export default function Home() {
         </div>
       </aside>
 
-      <main className="app-main">
-        <Editor
-          key={sessionId}
-          initialProject={project}
-          title={title}
-          onSaved={() => {
-            dirtyRef.current = false;
-            setReloadKey((k) => k + 1);
-          }}
-          onDirtyChange={(d) => {
-            dirtyRef.current = d;
-          }}
-        />
+      <main className={`app-main${showMixer ? ' mixer-mode' : ''}`}>
+        {showMixer && stemSet ? (
+          <Mixer set={stemSet} title={title} persisted onReset={() => selectView('import')} />
+        ) : (
+          <Editor
+            key={sessionId}
+            initialProject={project}
+            title={title}
+            onSaved={() => {
+              dirtyRef.current = false;
+              setReloadKey((k) => k + 1);
+            }}
+            onDirtyChange={(d) => {
+              dirtyRef.current = d;
+            }}
+          />
+        )}
       </main>
 
       {modal && (
