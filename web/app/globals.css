@@ -1940,3 +1940,122 @@ body.drag-trim * {
   background: var(--text);
   opacity: 0.85;
 }
+
+/* ============================ Responsive / touch ============================
+   The desktop layout is a fixed 210px sidebar + an internally-scrolling editor.
+   On phones/tablets (<=820px) the sidebar becomes an off-canvas drawer (driven
+   by the same `navOpen` state as the desktop rail — see app/page.tsx), the shell
+   switches to dynamic viewport units + safe-area insets (notch / home
+   indicator), modals go full-screen, and touch targets grow to >=44px.
+   The floating hamburger (.mobile-nav-open) and the drawer backdrop
+   (.drawer-backdrop) are hidden on desktop and only appear on small screens. */
+
+/* Dynamic viewport height so mobile browser chrome doesn't clip the shell. */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.mobile-nav-open,
+.drawer-backdrop {
+  display: none;
+}
+
+@media (max-width: 820px) {
+  /* Sidebar → fixed off-canvas drawer. */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    width: min(82vw, 300px);
+    z-index: 200;
+    transform: translateX(0);
+    transition: transform 0.2s ease;
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    padding-left: max(12px, env(safe-area-inset-left));
+  }
+
+  /* When "collapsed" (navOpen=false) the drawer slides off-screen instead of
+     shrinking to the desktop 60px rail; keep labels/foot visible when open. */
+  .sidebar.collapsed {
+    width: min(82vw, 300px);
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: 12px;
+    transform: translateX(-100%);
+  }
+  .sidebar.collapsed .label,
+  .sidebar.collapsed .sidebar-foot {
+    display: revert;
+  }
+  .sidebar.collapsed .nav-btn {
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  /* Dim backdrop behind the open drawer (rendered only when navOpen). */
+  .drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    background: rgba(4, 6, 12, 0.5);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+  }
+
+  /* Floating hamburger to open the drawer (the in-drawer chevron closes it). */
+  .mobile-nav-open {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: max(8px, env(safe-area-inset-top));
+    left: max(8px, env(safe-area-inset-left));
+    z-index: 140;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    box-shadow: var(--shadow-pop);
+  }
+
+  /* Main area: reclaim the sidebar's width, pad for safe areas, and leave room
+     at the top for the floating hamburger so the editor doesn't hide under it. */
+  .app-main {
+    padding: 12px;
+    padding-top: calc(44px + max(8px, env(safe-area-inset-top)) + 12px);
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  /* Bigger touch targets in the drawer. */
+  .nav-btn {
+    padding: 12px;
+    min-height: 44px;
+  }
+  .nav-toggle {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Modals become full-screen sheets. */
+  .modal-backdrop {
+    padding: 0;
+    align-items: stretch;
+  }
+  .modal,
+  .modal.modal-library {
+    width: 100%;
+    max-width: 100%;
+    min-height: 100dvh;
+    max-height: none;
+    border: none;
+    border-radius: 0;
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+      max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+}

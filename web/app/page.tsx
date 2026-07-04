@@ -39,16 +39,34 @@ export default function Home() {
   });
   const cancelledRef = useRef(false);
   const dirtyRef = useRef(false);
-  const [navOpen, setNavOpen] = useState(true);
+  // Start closed so the static-export first paint doesn't flash an open drawer on
+  // mobile; the mount effect opens it on desktop (or restores the saved rail).
+  const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
+    // On phones the sidebar is an off-canvas drawer (see globals.css) — start it
+    // closed so the editor is full-screen. On desktop, restore the saved rail
+    // preference.
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 820px)').matches) {
+      setNavOpen(false);
+      return;
+    }
     try {
       const v = localStorage.getItem('prismaxim-nav-open');
-      if (v !== null) setNavOpen(v === '1');
+      // Desktop defaults to open (rail expanded) on first visit.
+      setNavOpen(v === null ? true : v === '1');
     } catch {
-      /* ignore */
+      setNavOpen(true);
     }
   }, []);
+
+  // Open a view's modal; on mobile also close the drawer so it doesn't cover it.
+  const selectView = (v: View) => {
+    setModal(v);
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 820px)').matches) {
+      setNavOpen(false);
+    }
+  };
 
   const toggleNav = () =>
     setNavOpen((o) => {
@@ -177,6 +195,14 @@ export default function Home() {
 
   return (
     <div className="app-shell">
+      {/* Floating hamburger — only visible on small screens (see globals.css). */}
+      <button className="mobile-nav-open" onClick={toggleNav} aria-label="Open menu">
+        <Menu size={20} />
+      </button>
+
+      {/* Backdrop behind the mobile drawer; tapping it closes the drawer. */}
+      {navOpen && <div className="drawer-backdrop" onClick={toggleNav} />}
+
       <aside className={`sidebar${navOpen ? '' : ' collapsed'}`}>
         <button
           className="nav-toggle"
@@ -198,7 +224,7 @@ export default function Home() {
             <button
               key={v}
               className={`nav-btn${modal === v ? ' active' : ''}`}
-              onClick={() => setModal(v)}
+              onClick={() => selectView(v)}
               title={TITLES[v]}
             >
               <span className="nav-icon">
