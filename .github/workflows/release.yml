@@ -1,0 +1,92 @@
+name: Release
+
+# Fires on every push to main — i.e. whenever `dev` is promoted (merged) to main.
+# It only cuts a release when the version in package.json is NEW: if the matching
+# `v<version>` tag already exists, the run is a no-op. So the flow is:
+#   1. work on `dev`
+#   2. bump the version in package.json + desktop/package.json (e.g. 0.2.0 → 0.2.1)
+#   3. merge `dev` → `main`  →  this workflow builds the Windows installer and
+#      publishes a GitHub Release tagged v<version>.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # allow a manual release run from the Actions tab
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create tags + releases
+
+jobs:
+  # Cheap gate: decide whether main carries a not-yet-released version.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      tag: ${{ steps.check.outputs.tag }}
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need the full tag list to know if this version shipped
+
+      - id: check
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} already exists — nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version ${version} — will build and release ${tag}."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Build the Windows desktop installer and publish it as a GitHub Release.
+  release:
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    runs-on: windows-latest # native onnxruntime-node/ffmpeg-static must match Windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Root workspaces (shared/web/server): the web static export and the bundled
+      # backend are built from these during `desktop` → `npm run dist`.
+      - name: Install workspace deps
+        run: npm ci
+
+      # `desktop/` is standalone with its own lockfile (Electron, electron-builder,
+      # esbuild + the runtime deps that ship inside the app).
+      - name: Install desktop deps
+        run: npm ci
+        working-directory: desktop
+
+      # build:web (BUILD_TARGET=desktop static export → web/out) + build:backend
+      # (esbuild → dist/backend.mjs) + electron-builder --win (NSIS installer).
+      - name: Build Windows installer
+        run: npm run dist
+        working-directory: desktop
+        env:
+          # Lets electron-builder download its winCodeSign/nsis tooling from GitHub
+          # without hitting anonymous rate limits. Signing stays off unless CSC_* is set.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # gh CLI is preinstalled on the runner; creates the tag + release and uploads the .exe.
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ needs.check.outputs.tag }}" \
+            desktop/release/*.exe \
+            --title "Prismaxim ${{ needs.check.outputs.tag }}" \
+            --generate-notes
