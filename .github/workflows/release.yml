@@ -61,13 +61,16 @@ jobs:
 
       # Root workspaces (shared/web/server): the web static export and the bundled
       # backend are built from these during `desktop` → `npm run dist`.
+      # `npm install` (not `npm ci`) on purpose: the version is bumped by hand on
+      # each release, so the lockfile is intentionally allowed to drift — `npm ci`
+      # would hard-fail on that mismatch.
       - name: Install workspace deps
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       # `desktop/` is standalone with its own lockfile (Electron, electron-builder,
       # esbuild + the runtime deps that ship inside the app).
       - name: Install desktop deps
-        run: npm ci
+        run: npm install --no-audit --no-fund
         working-directory: desktop
 
       # build:web (BUILD_TARGET=desktop static export → web/out) + build:backend
