@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { STEM_META, type StemName } from '@prismaxim/shared';
+import { STEM_META, type SelectableStem } from '@prismaxim/shared';
 import type { MixerEngine } from '@/lib/mixer/engine';
 import { computePeaks, drawWaveform, type Peaks } from '@/lib/mixer/waveform';
 import { drawSpectrum, freqBuffer } from '@/lib/mixer/spectrum';
@@ -12,7 +12,7 @@ export default function Track({
   playing,
 }: {
   engine: MixerEngine;
-  name: StemName;
+  name: SelectableStem;
   playing: boolean;
 }) {
   const meta = STEM_META[name];

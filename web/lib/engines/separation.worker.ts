@@ -5,7 +5,12 @@
  */
 
 import * as ort from 'onnxruntime-web';
-import { separateMixture, type StemName, type StemSet } from '@prismaxim/shared';
+import {
+  separateMixture,
+  splitStemSelection,
+  type SelectableStem,
+  type StemSet,
+} from '@prismaxim/shared';
 import type { SeparationSession } from '@prismaxim/shared';
 import { loadModelBytes } from './model';
 import { ORT_WASM_BASE_URL } from '../config';
@@ -22,8 +27,8 @@ export interface RunMessage {
   modelUrl: string;
   cacheName: string;
   overlap?: number;
-  /** Which stems to produce; absent/empty = all 6. */
-  stems?: StemName[];
+  /** Which stems to produce; real names + optional `remaining`; absent/empty = all 6. */
+  stems?: SelectableStem[];
 }
 
 export type WorkerOut =
@@ -113,9 +118,11 @@ ctx.onmessage = async (ev: MessageEvent<RunMessage>) => {
     const { session, engine } = await createSession(modelBytes);
     post({ type: 'phase', phase: 'separating', percent: 0, engine });
 
+    const { include, remaining } = splitStemSelection(msg.stems);
     const set: StemSet = await separateMixture(msg.channels, session, {
       overlap: msg.overlap ?? 0.25,
-      include: msg.stems,
+      include,
+      remaining,
       onProgress: (f) =>
         post({ type: 'phase', phase: 'separating', percent: Math.round(f * 100), engine }),
     });

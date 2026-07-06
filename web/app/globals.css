@@ -650,6 +650,31 @@ input[type='url']:focus {
   flex: 0 0 auto;
 }
 
+/* full-width "remaining instruments" toggle below the 6-stem grid */
+.stem-remaining {
+  width: 100%;
+  margin-top: 8px;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.stem-remaining .stem-dot {
+  margin-top: 3px;
+}
+
+.stem-remaining-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stem-remaining-text .hint {
+  font-weight: 400;
+  font-size: 11.5px;
+  white-space: normal;
+}
+
 .stem-picker-foot {
   display: flex;
   align-items: center;

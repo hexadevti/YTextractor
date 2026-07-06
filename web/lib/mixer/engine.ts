@@ -8,10 +8,10 @@
  * offset; resuming recreates them at that offset.
  */
 
-import type { StemName, StemSet } from '@prismaxim/shared';
+import type { SelectableStem, StemName, StemSet } from '@prismaxim/shared';
 
 export interface TrackState {
-  name: StemName;
+  name: SelectableStem;
   muted: boolean;
   soloed: boolean;
   removed: boolean;
@@ -20,7 +20,7 @@ export interface TrackState {
 }
 
 interface Channel {
-  name: StemName;
+  name: SelectableStem;
   buffer: AudioBuffer;
   gain: GainNode;
   analyser: AnalyserNode;
@@ -33,7 +33,7 @@ export class MixerEngine {
   readonly sampleRate: number;
   private master: GainNode;
   private channels: Channel[] = [];
-  private tracks = new Map<StemName, TrackState>();
+  private tracks = new Map<SelectableStem, TrackState>();
 
   private playing = false;
   /** ctx.currentTime when playback (re)started */
@@ -71,11 +71,11 @@ export class MixerEngine {
     }
   }
 
-  getChannelBuffer(name: StemName): AudioBuffer | undefined {
+  getChannelBuffer(name: SelectableStem): AudioBuffer | undefined {
     return this.channels.find((c) => c.name === name)?.buffer;
   }
 
-  getAnalyser(name: StemName): AnalyserNode | undefined {
+  getAnalyser(name: SelectableStem): AnalyserNode | undefined {
     return this.channels.find((c) => c.name === name)?.analyser;
   }
 
@@ -84,7 +84,7 @@ export class MixerEngine {
   }
 
   /** Channels that are currently audible, with their effective linear gain. */
-  getMixPlan(): { name: StemName; buffer: AudioBuffer; gain: number }[] {
+  getMixPlan(): { name: SelectableStem; buffer: AudioBuffer; gain: number }[] {
     return this.channels
       .map((c) => ({ name: c.name, buffer: c.buffer, gain: this.effectiveGain(c.name) }))
       .filter((p) => p.gain > 0);
@@ -99,7 +99,7 @@ export class MixerEngine {
   }
 
   /** Effective gain for a channel given mute/solo/remove across all tracks. */
-  private effectiveGain(name: StemName): number {
+  private effectiveGain(name: SelectableStem): number {
     const t = this.tracks.get(name)!;
     if (t.removed || t.muted) return 0;
     const anySolo = [...this.tracks.values()].some((s) => s.soloed && !s.removed);
@@ -114,22 +114,22 @@ export class MixerEngine {
     }
   }
 
-  setMuted(name: StemName, muted: boolean) {
+  setMuted(name: SelectableStem, muted: boolean) {
     this.tracks.get(name)!.muted = muted;
     this.applyGains();
   }
 
-  setSoloed(name: StemName, soloed: boolean) {
+  setSoloed(name: SelectableStem, soloed: boolean) {
     this.tracks.get(name)!.soloed = soloed;
     this.applyGains();
   }
 
-  setRemoved(name: StemName, removed: boolean) {
+  setRemoved(name: SelectableStem, removed: boolean) {
     this.tracks.get(name)!.removed = removed;
     this.applyGains();
   }
 
-  setVolume(name: StemName, volume: number) {
+  setVolume(name: SelectableStem, volume: number) {
     this.tracks.get(name)!.volume = volume;
     this.applyGains();
   }
@@ -137,7 +137,7 @@ export class MixerEngine {
   /** Apply a preset: mute exactly the named stems, unmute the rest. */
   applyPreset(mutedNames: StemName[]) {
     for (const t of this.tracks.values()) {
-      t.muted = mutedNames.includes(t.name);
+      t.muted = (mutedNames as SelectableStem[]).includes(t.name);
       t.soloed = false;
     }
     this.applyGains();

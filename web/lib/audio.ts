@@ -6,7 +6,7 @@
 import {
   MODEL_CHANNELS,
   MODEL_SAMPLE_RATE,
-  type StemName,
+  type SelectableStem,
   type StemSet,
   STEM_NAMES,
 } from '@prismaxim/shared';
@@ -58,7 +58,7 @@ export async function decodeToModelAudio(bytes: ArrayBuffer): Promise<DecodedAud
 export function stemSetFromChannels(
   perStemChannels: Float32Array[][],
   sampleRate: number,
-  names: readonly StemName[] = STEM_NAMES,
+  names: readonly SelectableStem[] = STEM_NAMES,
 ): StemSet {
   const length = perStemChannels[0]?.[0]?.length ?? 0;
   const numChannels = perStemChannels[0]?.length ?? MODEL_CHANNELS;

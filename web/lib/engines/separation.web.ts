@@ -3,7 +3,7 @@
  * feeds it decoded audio, relays progress, and resolves with a StemSet.
  */
 
-import type { ProgressUpdate, StemName, StemSet } from '@prismaxim/shared';
+import type { ProgressUpdate, SelectableStem, StemSet } from '@prismaxim/shared';
 import type { DecodedAudio } from '../audio';
 import { MODEL_CACHE, MODEL_URL } from '../config';
 import type { RunMessage, WorkerOut } from './separation.worker';
@@ -11,7 +11,7 @@ import type { RunMessage, WorkerOut } from './separation.worker';
 export function separateInBrowser(
   audio: DecodedAudio,
   onProgress: (p: ProgressUpdate) => void,
-  stems?: StemName[],
+  stems?: SelectableStem[],
 ): Promise<StemSet> {
   return new Promise<StemSet>((resolve, reject) => {
     const worker = new Worker(new URL('./separation.worker.ts', import.meta.url), {

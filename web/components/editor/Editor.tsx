@@ -11,6 +11,7 @@ import {
   FolderInput,
   Gauge,
   Hand,
+  Layers,
   ListPlus,
   Magnet,
   MoreHorizontal,
@@ -29,6 +30,7 @@ import {
   TrendingUp,
   X,
 } from 'lucide-react';
+import { REMAINING_STEM, STEM_META, type SelectableStem } from '@prismaxim/shared';
 import {
   clipEnd,
   cloneProject,
@@ -65,12 +67,21 @@ import {
   supportsOutputSelection,
   type DeviceLists,
 } from '@/lib/editor/devices';
-import { downloadBlob, encodeMp3, encodeWav, renderProject, renderTrack } from '@/lib/editor/export';
+import {
+  downloadBlob,
+  encodeMp3,
+  encodeWav,
+  peakLevel,
+  renderProject,
+  renderRegionToModelAudio,
+  renderTrack,
+} from '@/lib/editor/export';
 import { transcribeAudioBuffer } from '@/lib/editor/transcribe';
 import { notesToSmf } from '@/lib/editor/midi';
 import { cleanNotes, toMonophonic } from '@/lib/editor/midiClean';
 import { getInstrument } from '@/lib/editor/instruments';
 import { computeMusicStats, type MusicStats } from '@/lib/editor/musicStats';
+import StemPicker from '@/components/StemPicker';
 import StatsPanel from './StatsPanel';
 import Toolbar from './Toolbar';
 import RecordBar from './RecordBar';
@@ -233,6 +244,16 @@ export default function Editor({
     monophonic: false,
     keep: 'low' as 'low' | 'high',
   });
+  // "Separate selection into stems": a region-scoped Demucs pass. The dialog
+  // captures the selected time range + tracks; the picker chooses which stems
+  // (plus the optional "remaining" bucket) to drop back at the selection start.
+  const [stemDialog, setStemDialog] = useState<{
+    startSec: number;
+    endSec: number;
+    trackIds: string[];
+  } | null>(null);
+  const [stemSel, setStemSel] = useState<SelectableStem[]>(['vocals', REMAINING_STEM]);
+  const [sepProgress, setSepProgress] = useState<{ percent: number; label: string } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; trackId: string } | null>(null);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
 
@@ -1528,6 +1549,102 @@ export default function Editor({
     }
   };
 
+  /* ---------- separate a selected region into stems ---------- */
+  // Open the stem picker for the current block selection (a time range across one
+  // or more tracks, or the range spanned by the selected clips).
+  const openStemDialog = useCallback(() => {
+    setMenu(null);
+    const sel = effSelection();
+    const trackIds = sel.trackIds.length
+      ? sel.trackIds
+      : projectRef.current.tracks.map((t) => t.id);
+    if (sel.endSec - sel.startSec < 0.05 || trackIds.length === 0) {
+      window.alert(
+        'Select a region first: drag across the timeline (or select clips), then right-click → Separate into stems.',
+      );
+      return;
+    }
+    setStemDialog({ startSec: sel.startSec, endSec: sel.endSec, trackIds });
+  }, [effSelection]);
+
+  // Render the selected region to model audio, run Demucs, and drop each chosen
+  // stem back at the selection's start — reusing a same-named/same-stem track
+  // when one exists, otherwise creating one named after the stem.
+  const runSeparateSelection = useCallback(async () => {
+    const dlg = stemDialog;
+    if (!dlg) return;
+    const picks = stemSel;
+    setStemDialog(null);
+    if (!picks.length) return;
+    setSepProgress({ percent: 0, label: 'Preparing audio…' });
+    try {
+      const audio = await renderRegionToModelAudio(
+        projectRef.current,
+        dlg.trackIds,
+        dlg.startSec,
+        dlg.endSec,
+      );
+      if (peakLevel(audio.channels) < 1e-4) {
+        window.alert('The selected region has no audible audio to separate.');
+        return;
+      }
+      // Lazy-load the browser separation worker (keeps onnxruntime-web out of the
+      // editor's initial chunk). Separation runs client-side, in this tab.
+      const { separateInBrowser } = await import('@/lib/engines/separation.web');
+      const set = await separateInBrowser(
+        audio,
+        (p) =>
+          setSepProgress({
+            percent: p.percent,
+            label: p.phase === 'loading-model' ? 'Loading model…' : 'Separating…',
+          }),
+        picks,
+      );
+      const dur = dlg.endSec - dlg.startSec;
+      const next = cloneProject(projectRef.current);
+      const affected = new Set<string>();
+      const newClipIds: string[] = [];
+      for (const stem of set.stems) {
+        const meta = STEM_META[stem.name];
+        const label = meta?.label ?? stem.name;
+        const clip: Clip = {
+          id: uid(),
+          buffer: makeAudioBuffer(stem.channels, set.sampleRate),
+          startSec: dlg.startSec,
+          offsetSec: 0,
+          durationSec: dur,
+        };
+        let track =
+          next.tracks.find((t) => t.stem === stem.name) ??
+          next.tracks.find((t) => t.name === label);
+        if (!track) {
+          track = {
+            id: uid(),
+            name: label,
+            color: meta?.color ?? '#64748b',
+            stem: stem.name,
+            clips: [],
+            muted: false,
+            soloed: false,
+            volume: 1,
+            armed: false,
+          };
+          next.tracks.push(track);
+        }
+        track.clips.push(clip);
+        affected.add(track.id);
+        newClipIds.push(clip.id);
+      }
+      commit(next);
+      // Select the freshly-placed stem clips so the new block is ready to use.
+      setSelection({ startSec: 0, endSec: 0, trackIds: [...affected], clipIds: newClipIds });
+    } catch (e) {
+      window.alert('Stem separation failed: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSepProgress(null);
+    }
+  }, [stemDialog, stemSel, commit]);
+
   const exportMidi = (track: EditorTrack) => {
     if (!track.midi?.length) return;
     const bytes = notesToSmf(track.midi, {
@@ -2005,6 +2122,25 @@ export default function Editor({
         </div>
       )}
 
+      {sepProgress && (
+        <div className="midi-overlay">
+          <div className="midi-progress-card">
+            <div className="phase-label">
+              <strong className="mp-title">
+                <Layers size={16} /> Separating selection into stems…
+              </strong>
+              <span className="engine">{sepProgress.percent}%</span>
+            </div>
+            <div className="bar">
+              <span style={{ width: `${Math.max(4, sepProgress.percent)}%` }} />
+            </div>
+            <p className="hint" style={{ marginTop: 8 }}>
+              {sepProgress.label} Keep this tab open.
+            </p>
+          </div>
+        </div>
+      )}
+
       {cleanTrack && (
         <div className="modal-backdrop">
           <div className="modal" style={{ maxWidth: 420 }} onPointerDown={(e) => e.stopPropagation()}>
@@ -2193,6 +2329,45 @@ export default function Editor({
         </div>
       )}
 
+      {stemDialog && (
+        <div className="modal-backdrop">
+          <div className="modal" style={{ maxWidth: 460 }} onPointerDown={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span>Separate selection into stems</span>
+              <button className="modal-close" onClick={() => setStemDialog(null)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="panel">
+                <p className="hint" style={{ marginTop: 0 }}>
+                  Splits {fmtTime(stemDialog.startSec)}–{fmtTime(stemDialog.endSec)} of the selected
+                  track{stemDialog.trackIds.length > 1 ? 's' : ''} into the stems below and drops each
+                  one back at the same spot. A stem reuses its matching track when one exists;
+                  otherwise a new track is created. Runs in your browser.
+                </p>
+                <div className="field">
+                  <label>Stems to create</label>
+                  <StemPicker value={stemSel} onChange={setStemSel} />
+                </div>
+                <div className="row" style={{ marginTop: 12 }}>
+                  <button
+                    className="btn"
+                    onClick={runSeparateSelection}
+                    disabled={stemSel.length === 0}
+                  >
+                    <Layers size={15} /> Separate
+                  </button>
+                  <button className="btn ghost" onClick={() => setStemDialog(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {exportOpen && (
         <div className="modal-backdrop">
           <div className="modal" style={{ maxWidth: 400 }} onPointerDown={(e) => e.stopPropagation()}>
@@ -2301,6 +2476,9 @@ export default function Editor({
               {selection.endSec - selection.startSec > 1e-6
                 ? 'Split selection to new clip'
                 : 'Split at playhead'}
+            </button>
+            <button onClick={openStemDialog} disabled={!hasSelection}>
+              <Layers size={14} /> Separate into stems…
             </button>
             {selection.clipIds.length > 0 && (
               <>

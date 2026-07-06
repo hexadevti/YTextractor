@@ -10,7 +10,7 @@
  *    backend, which also persists to the filesystem library.
  */
 
-import type { JobConfig, ProgressUpdate, SourceMeta, StemName, StemSet } from '@prismaxim/shared';
+import type { JobConfig, ProgressUpdate, SelectableStem, SourceMeta, StemSet } from '@prismaxim/shared';
 import { IS_DESKTOP, IS_MOBILE } from './env';
 import { decodeToModelAudio } from './audio';
 import { separateInBrowser } from './engines/separation.web';
@@ -48,7 +48,7 @@ async function separateAndPersistInBrowser(
   title: string,
   sourceId: string | undefined,
   onProgress: (p: ProgressUpdate) => void,
-  stems?: StemName[],
+  stems?: SelectableStem[],
 ): Promise<StemSet> {
   const audio = await decodeToModelAudio(bytes);
   const { wrapped, state } = engineTracker(onProgress);
@@ -65,7 +65,7 @@ async function cloudSeparateBytes(
   title: string,
   sourceId: string | undefined,
   onProgress: (p: ProgressUpdate) => void,
-  stems?: StemName[],
+  stems?: SelectableStem[],
 ): Promise<StemSet> {
   const set = await separateOnCloud(getCloudUrl(), getCloudToken(), bytes, onProgress, stems);
   await store.saveProject(set, { title, sourceId, engine: 'cloud' }, onProgress);
@@ -77,7 +77,7 @@ async function separateAndPersistOnCloud(
   file: File,
   title: string,
   onProgress: (p: ProgressUpdate) => void,
-  stems?: StemName[],
+  stems?: SelectableStem[],
 ): Promise<StemSet> {
   const source = await store.saveSource(file);
   return cloudSeparateBytes(await file.arrayBuffer(), title, source.id, onProgress, stems);
@@ -202,7 +202,7 @@ export async function splitSavedSource(
   backendBaseUrl: string,
   onProgress: (p: ProgressUpdate) => void,
   useCloud = false,
-  stems?: StemName[],
+  stems?: SelectableStem[],
 ): Promise<{ set?: StemSet; project?: EditorProject }> {
   if (!stems || stems.length === 0) {
     onProgress({ phase: 'loading-model', percent: 60, message: 'Loading track…' });

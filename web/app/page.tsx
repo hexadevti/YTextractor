@@ -7,8 +7,8 @@ import type {
   JobConfig,
   ProgressUpdate,
   ProjectMeta,
+  SelectableStem,
   SourceMeta,
-  StemName,
   StemSet,
 } from '@prismaxim/shared';
 import StartPanel from '@/components/StartPanel';
@@ -210,7 +210,7 @@ export default function Home() {
   );
 
   const splitSource = useCallback(
-    (source: SourceMeta, useCloud = false, stems?: StemName[]) =>
+    (source: SourceMeta, useCloud = false, stems?: SelectableStem[]) =>
       runInModal(async () => {
         const { set, project } = await splitSavedSource(source, backendUrl, onProgress, useCloud, stems);
         return { title: source.title, set, project };

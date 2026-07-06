@@ -8,7 +8,7 @@
  * makes undo/redo (snapshotting metadata) cheap.
  */
 
-import { STEM_META, type StemName, type StemSet } from '@prismaxim/shared';
+import { STEM_META, type SelectableStem, type StemSet } from '@prismaxim/shared';
 
 export interface Clip {
   id: string;
@@ -37,8 +37,9 @@ export interface EditorTrack {
   id: string;
   name: string;
   color: string;
-  /** origin stem name (absent for recorded tracks) — used for presets */
-  stem?: StemName;
+  /** origin stem name (absent for recorded tracks) — used for presets. May be the
+   *  synthetic 'remaining' bucket for a summed-leftover track. */
+  stem?: SelectableStem;
   clips: Clip[];
   muted: boolean;
   soloed: boolean;

@@ -16,7 +16,13 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import Fastify from 'fastify';
-import { parseStemList, separateMixture, type SeparationSession, type StemSet } from '@prismaxim/shared';
+import {
+  parseStemSelection,
+  separateMixture,
+  splitStemSelection,
+  type SeparationSession,
+  type StemSet,
+} from '@prismaxim/shared';
 import { decodePcm, encodeFlac } from './encode';
 import { createSession } from './runtime';
 
@@ -89,13 +95,16 @@ async function main() {
     const audio = req.body as Buffer;
     if (!audio || audio.length === 0) return reply.code(400).send('Empty audio body');
 
-    // Optional stem selection: encode/return only these (absent = all 6).
-    const include = parseStemList(req.headers['x-stems'] as string | undefined);
+    // Optional stem selection: encode/return only these (absent = all 6). A
+    // `remaining` sentinel adds one track summing the sources not picked.
+    const { include, remaining } = splitStemSelection(
+      parseStemSelection(req.headers['x-stems'] as string | undefined),
+    );
 
     const t0 = Date.now();
     const pcm = await decodePcm(audio);
     const { session, engine } = await getSession();
-    const set = await separateMixture(pcm.channels, session, { overlap: OVERLAP, include });
+    const set = await separateMixture(pcm.channels, session, { overlap: OVERLAP, include, remaining });
     const body = await frameStems(set);
     app.log.info(
       `separated ${(audio.length / 1e6).toFixed(1)}MB → ${set.stems.length} stems in ${Date.now() - t0}ms on ${engine}`,
