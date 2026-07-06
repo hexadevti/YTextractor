@@ -1867,6 +1867,75 @@ body.drag-trim * {
   opacity: 0.85;
 }
 
+/* ---------- editor: mobile build (compact, fixed lanes) ----------
+   Gated on the mobile build (html.is-mobile), not screen width, so a narrow
+   desktop window keeps the full editor — mirrors the IS_MOBILE gating in JS. */
+
+/* Collapsible "More…" row holding the tools kept out of the compact transport. */
+.is-mobile .editor-more {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Fixed lanes: hide the drag-resize handles so header + track heights can't be
+   changed by dragging (sizes are set in JS: MOBILE_LANE_HEIGHT / _SIDEBAR_WIDTH). */
+.is-mobile .sidebar-resize,
+.is-mobile .lane-resize {
+  display: none;
+}
+
+/* Compact side header so a short lane doesn't clip the name / controls / fader. */
+.is-mobile .lane-sidebar {
+  gap: 3px;
+  padding: 4px 6px;
+  cursor: default;
+}
+.is-mobile .lane-name {
+  font-size: 12px;
+}
+.is-mobile .lane-controls {
+  gap: 3px;
+}
+.is-mobile .lane-controls .mini {
+  width: 22px;
+  height: 20px;
+}
+
+/* Shrink the volume control (the fader height also drives the VU meter behind it). */
+.is-mobile .lane-fader {
+  height: 9px;
+  margin-top: 0;
+}
+.is-mobile .lane-fader-input::-webkit-slider-thumb {
+  height: 9px;
+}
+.is-mobile .lane-fader-input::-moz-range-thumb {
+  height: 9px;
+}
+
+/* Compact the primary transport row so play/new-track/save + More fit one line
+   on a phone-width screen (it still wraps gracefully if it can't). */
+.is-mobile .editor-transport {
+  gap: 6px;
+}
+.is-mobile .editor-transport .btn {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.is-mobile .tp-btn {
+  min-width: 34px;
+  padding: 6px 7px;
+}
+.is-mobile .editor-transport .time {
+  font-size: 11px;
+}
+
 .editor-tools {
   width: 264px;
   flex-shrink: 0;

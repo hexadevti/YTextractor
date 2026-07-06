@@ -11,7 +11,9 @@ import {
   FolderInput,
   Gauge,
   Hand,
+  ListPlus,
   Magnet,
+  MoreHorizontal,
   Music,
   Music4,
   Play,
@@ -96,6 +98,11 @@ import { IS_MOBILE } from '@/lib/env';
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const EDGE_PX = 6;
 
+// Mobile: fixed, compact lane + side-header sizes (never resized by dragging —
+// the handles are hidden on mobile). Kept in sync with the compact header CSS.
+const MOBILE_LANE_HEIGHT = 64;
+const MOBILE_SIDEBAR_WIDTH = 132;
+
 /** Force a window-wide cursor for the active clip drag (or clear it when null). */
 function setDragCursor(mode: DragState['mode'] | null) {
   const cls = document.body.classList;
@@ -170,14 +177,21 @@ export default function Editor({
   const [pxPerSec, setPxPerSec] = useState(20);
   const [scrollSec, setScrollSec] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
-  const [laneHeight, setLaneHeight] = useState(LANE_HEIGHT);
-  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_WIDTH);
+  // Mobile lanes are compact and fixed: start from the mobile sizes and never
+  // mutate them (the drag-resize handles are hidden on mobile — see globals.css).
+  const [laneHeight, setLaneHeight] = useState(IS_MOBILE ? MOBILE_LANE_HEIGHT : LANE_HEIGHT);
+  const [sidebarWidth, setSidebarWidth] = useState(
+    IS_MOBILE ? MOBILE_SIDEBAR_WIDTH : SIDEBAR_WIDTH,
+  );
   const viewportWidth = Math.max(0, containerWidth - sidebarWidth);
   const [playing, setPlaying] = useState(false);
   const [, setTimeSec] = useState(0);
   const [hasClipboard, setHasClipboard] = useState(false);
   const [exporting, setExporting] = useState<null | 'wav' | 'mp3'>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  // Mobile: the transport row keeps only play/new-track/save; everything else
+  // lives in a collapsible "More…" row toggled by this flag.
+  const [moreOpen, setMoreOpen] = useState(false);
   const [exportScope, setExportScope] = useState<'mix' | 'track'>('mix');
   const [exportParams, setExportParams] = useState({
     format: 'wav' as 'wav' | 'mp3',
@@ -1592,204 +1606,266 @@ export default function Editor({
   const duration = totalDuration(project);
   const viewportSec = viewportWidth / pxPerSec || 0;
 
+  // Transport-bar pieces — shared markup, arranged differently per platform:
+  // desktop lays them all inline; mobile keeps a compact primary row (transport +
+  // New track + Save) and moves the rest into a collapsible "More…" row.
+  const transportGroup = (
+    <div className="tp-group">
+      <button className="btn secondary tp-btn" onClick={() => seekTo(0)} title="To start">
+        <SkipBack size={16} />
+      </button>
+      <button
+        className="btn tp-btn"
+        onClick={togglePlay}
+        disabled={!engine}
+        title="Play / Pause (Space)"
+      >
+        {playing ? <Pause size={16} /> : <Play size={16} />}
+      </button>
+      <button
+        className={`btn tp-btn rec${recording ? ' on' : ''}`}
+        onClick={toggleRecord}
+        title={recording ? 'Stop recording' : 'Record (into armed track or a new take)'}
+      >
+        {recording ? <Square size={13} fill="currentColor" /> : <Circle size={13} fill="currentColor" />}
+      </button>
+      <button
+        className="btn secondary tp-btn"
+        onClick={() => seekTo(duration)}
+        disabled={!engine || duration <= 0}
+        title="To end"
+      >
+        <SkipForward size={16} />
+      </button>
+      <span className="time">
+        {fmtTime(engineRef.current?.currentTime() ?? 0)} / {fmtTime(duration)}
+      </span>
+    </div>
+  );
+
+  const metronomeGroup = (
+    <div className="tp-group">
+      <label className="dev checkbox" title="Metronome">
+        <input type="checkbox" checked={metroOn} onChange={(e) => setMetroOn(e.target.checked)} />
+        <Music size={15} />
+      </label>
+      <div className="metro-group">
+        <button className="btn ghost nudge" onClick={() => setBpm(Math.max(40, bpm - 1))} title="Slower">
+          −
+        </button>
+        <input
+          type="number"
+          min={40}
+          max={260}
+          value={bpm}
+          onChange={(e) => setBpm(Math.max(40, Math.min(260, Number(e.target.value) || 0)))}
+          title="BPM"
+        />
+        <button className="btn ghost nudge" onClick={() => setBpm(Math.min(260, bpm + 1))} title="Faster">
+          ＋
+        </button>
+        <button className="btn secondary" onClick={tapTempo} title="Tap in rhythm to set the tempo">
+          <Hand size={14} /> Tap
+        </button>
+        <span className="hint">{bpm} BPM</span>
+      </div>
+      {/* Beat-snap + playback-speed controls are desktop-only. */}
+      {!IS_MOBILE && (
+      <>
+      <span className="sep" />
+      <label className="dev checkbox" title="Snap ao BPM: gruda cursor e clipes nas batidas">
+        <input type="checkbox" checked={bpmSnap} onChange={(e) => setBpmSnap(e.target.checked)} />
+        <Magnet size={15} />
+      </label>
+      {bpmSnap && (
+        <div className="metro-group">
+          <button
+            className="btn ghost nudge"
+            onClick={() => setBpmOffsetSec((s) => Math.max(-2, s - 0.005))}
+            title="Offset −5 ms"
+          >
+            −
+          </button>
+          <input
+            type="number"
+            min={-2000}
+            max={2000}
+            step={5}
+            value={Math.round(bpmOffsetSec * 1000)}
+            onChange={(e) =>
+              setBpmOffsetSec(Math.max(-2, Math.min(2, (Number(e.target.value) || 0) / 1000)))
+            }
+            title="Offset dos pontos de snap (ms)"
+          />
+          <button
+            className="btn ghost nudge"
+            onClick={() => setBpmOffsetSec((s) => Math.min(2, s + 0.005))}
+            title="Offset +5 ms"
+          >
+            ＋
+          </button>
+          <span className="hint">offset ms</span>
+        </div>
+      )}
+      <span className="sep" />
+      <label className="dev" title="Playback speed">
+        <Gauge size={14} />
+        <select value={rate} onChange={(e) => changeRate(Number(e.target.value))}>
+          {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
+            <option key={r} value={r}>
+              {r}×
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="keep-pitch" title="Preserve pitch when changing speed (time-stretch)">
+        <input
+          type="checkbox"
+          checked={keepPitch}
+          onChange={(e) => toggleKeepPitch(e.target.checked)}
+        />
+        Keep pitch
+        {pitchBusy && rate !== 1 && keepPitch && (
+          <span className="hint">
+            {' '}
+            building{stretchProg ? ` ${stretchProg.done}/${stretchProg.total}` : ''}…
+          </span>
+        )}
+      </label>
+      </>
+      )}
+    </div>
+  );
+
+  const importBtn = onImport ? (
+    <button
+      className="btn secondary"
+      onClick={onImport}
+      title="Import audio — as a new project or added to this one"
+    >
+      <FolderInput size={15} /> Import…
+    </button>
+  ) : null;
+
+  const exportBtn = (
+    <button
+      className="btn"
+      disabled={exporting !== null}
+      onClick={() => {
+        setExportScope(canExportTrack ? 'track' : 'mix');
+        setExportOpen(true);
+      }}
+      title="Export the selected track or the full mix as an audio file"
+    >
+      {exporting ? 'Exporting…' : <><Download size={15} /> Export</>}
+    </button>
+  );
+
+  const saveBtn = (
+    <button
+      className="btn secondary"
+      onClick={saveProject}
+      disabled={saveState === 'saving'}
+      title="Save the editable project to the library"
+    >
+      {saveState === 'saving' ? (
+        'Saving…'
+      ) : saveState === 'saved' ? (
+        <>
+          <Check size={14} /> Saved
+        </>
+      ) : saveState === 'error' ? (
+        <>
+          <AlertTriangle size={14} /> Retry save
+        </>
+      ) : (
+        <>
+          <Save size={15} /> Save
+        </>
+      )}
+    </button>
+  );
+
+  const newTrackBtn = (
+    <button className="btn secondary" onClick={addTrack} title="Add an empty track">
+      <ListPlus size={15} /> Track
+    </button>
+  );
+
+  const toolbarNode = (
+    <Toolbar
+      onCut={doCut}
+      onCopy={doCopy}
+      onPaste={doPaste}
+      onSplit={doSplit}
+      onDelete={doDelete}
+      onUndo={doUndo}
+      onRedo={doRedo}
+      canUndo={history.canUndo()}
+      canRedo={history.canRedo()}
+      canPaste={hasClipboard}
+      hasSelection={hasSelection}
+      onZoomIn={() => zoomBy(1.4)}
+      onZoomOut={() => zoomBy(0.71)}
+      onFit={fitView}
+      onAddTrack={addTrack}
+      onDetectTempo={doDetectTempo}
+      onDetectChords={doDetectChords}
+      onStats={doStats}
+      analyzing={analyzing}
+      chordCount={chords.length}
+      toolsOpen={toolsOpen}
+      onToggleTools={() => setToolsOpen((v) => !v)}
+      hideAddTrack={IS_MOBILE}
+    />
+  );
+
   return (
     <div className="panel editor">
-      {/* Transport bar: jump-to-start, play, record, time, metronome, and file actions */}
-      <div className="editor-transport">
-        <div className="tp-group">
-          <button className="btn secondary tp-btn" onClick={() => seekTo(0)} title="To start">
-            <SkipBack size={16} />
-          </button>
-          <button
-            className="btn tp-btn"
-            onClick={togglePlay}
-            disabled={!engine}
-            title="Play / Pause (Space)"
-          >
-            {playing ? <Pause size={16} /> : <Play size={16} />}
-          </button>
-          <button
-            className={`btn tp-btn rec${recording ? ' on' : ''}`}
-            onClick={toggleRecord}
-            title={recording ? 'Stop recording' : 'Record (into armed track or a new take)'}
-          >
-            {recording ? <Square size={13} fill="currentColor" /> : <Circle size={13} fill="currentColor" />}
-          </button>
-          <button
-            className="btn secondary tp-btn"
-            onClick={() => seekTo(duration)}
-            disabled={!engine || duration <= 0}
-            title="To end"
-          >
-            <SkipForward size={16} />
-          </button>
-          <span className="time">
-            {fmtTime(engineRef.current?.currentTime() ?? 0)} / {fmtTime(duration)}
-          </span>
-        </div>
-
-        <div className="tp-group">
-          <label className="dev checkbox" title="Metronome">
-            <input type="checkbox" checked={metroOn} onChange={(e) => setMetroOn(e.target.checked)} />
-            <Music size={15} />
-          </label>
-          <div className="metro-group">
-            <button className="btn ghost nudge" onClick={() => setBpm(Math.max(40, bpm - 1))} title="Slower">
-              −
-            </button>
-            <input
-              type="number"
-              min={40}
-              max={260}
-              value={bpm}
-              onChange={(e) => setBpm(Math.max(40, Math.min(260, Number(e.target.value) || 0)))}
-              title="BPM"
-            />
-            <button className="btn ghost nudge" onClick={() => setBpm(Math.min(260, bpm + 1))} title="Faster">
-              ＋
-            </button>
-            <button className="btn secondary" onClick={tapTempo} title="Tap in rhythm to set the tempo">
-              <Hand size={14} /> Tap
-            </button>
-            <span className="hint">{bpm} BPM</span>
+      {/* Transport bar. Desktop lays every control inline; mobile keeps a compact
+          primary row (transport + New track + Save) and tucks the rest into a
+          collapsible "More…" row. */}
+      {IS_MOBILE ? (
+        <>
+          <div className="editor-transport">
+            {transportGroup}
+            <div className="tp-group tp-right">
+              {newTrackBtn}
+              {saveBtn}
+              <button
+                className={`btn ghost tp-more${moreOpen ? ' active' : ''}`}
+                onClick={() => setMoreOpen((v) => !v)}
+                title={moreOpen ? 'Hide extra tools' : 'Show extra tools'}
+              >
+                <MoreHorizontal size={16} /> {moreOpen ? 'Less' : 'More'}
+              </button>
+            </div>
           </div>
-          {/* Beat-snap + playback-speed controls are desktop-only. */}
-          {!IS_MOBILE && (
-          <>
-          <span className="sep" />
-          <label className="dev checkbox" title="Snap ao BPM: gruda cursor e clipes nas batidas">
-            <input type="checkbox" checked={bpmSnap} onChange={(e) => setBpmSnap(e.target.checked)} />
-            <Magnet size={15} />
-          </label>
-          {bpmSnap && (
-            <div className="metro-group">
-              <button
-                className="btn ghost nudge"
-                onClick={() => setBpmOffsetSec((s) => Math.max(-2, s - 0.005))}
-                title="Offset −5 ms"
-              >
-                −
-              </button>
-              <input
-                type="number"
-                min={-2000}
-                max={2000}
-                step={5}
-                value={Math.round(bpmOffsetSec * 1000)}
-                onChange={(e) =>
-                  setBpmOffsetSec(Math.max(-2, Math.min(2, (Number(e.target.value) || 0) / 1000)))
-                }
-                title="Offset dos pontos de snap (ms)"
-              />
-              <button
-                className="btn ghost nudge"
-                onClick={() => setBpmOffsetSec((s) => Math.min(2, s + 0.005))}
-                title="Offset +5 ms"
-              >
-                ＋
-              </button>
-              <span className="hint">offset ms</span>
+          {moreOpen && (
+            <div className="editor-more">
+              {metronomeGroup}
+              <div className="tp-group">
+                {importBtn}
+                {exportBtn}
+              </div>
+              {toolbarNode}
             </div>
           )}
-          <span className="sep" />
-          <label className="dev" title="Playback speed">
-            <Gauge size={14} />
-            <select value={rate} onChange={(e) => changeRate(Number(e.target.value))}>
-              {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
-                <option key={r} value={r}>
-                  {r}×
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="keep-pitch" title="Preserve pitch when changing speed (time-stretch)">
-            <input
-              type="checkbox"
-              checked={keepPitch}
-              onChange={(e) => toggleKeepPitch(e.target.checked)}
-            />
-            Keep pitch
-            {pitchBusy && rate !== 1 && keepPitch && (
-              <span className="hint">
-                {' '}
-                building{stretchProg ? ` ${stretchProg.done}/${stretchProg.total}` : ''}…
-              </span>
-            )}
-          </label>
-          </>
-          )}
-        </div>
-
-        <div className="tp-group tp-right">
-          {onImport && (
-            <button
-              className="btn secondary"
-              onClick={onImport}
-              title="Import audio — as a new project or added to this one"
-            >
-              <FolderInput size={15} /> Import…
-            </button>
-          )}
-          <button
-            className="btn"
-            disabled={exporting !== null}
-            onClick={() => {
-              setExportScope(canExportTrack ? 'track' : 'mix');
-              setExportOpen(true);
-            }}
-            title="Export the selected track or the full mix as an audio file"
-          >
-            {exporting ? 'Exporting…' : <><Download size={15} /> Export</>}
-          </button>
-          <button
-            className="btn secondary"
-            onClick={saveProject}
-            disabled={saveState === 'saving'}
-            title="Save the editable project to the library"
-          >
-            {saveState === 'saving' ? (
-              'Saving…'
-            ) : saveState === 'saved' ? (
-              <>
-                <Check size={14} /> Saved
-              </>
-            ) : saveState === 'error' ? (
-              <>
-                <AlertTriangle size={14} /> Retry save
-              </>
-            ) : (
-              <>
-                <Save size={15} /> Save
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      <Toolbar
-        onCut={doCut}
-        onCopy={doCopy}
-        onPaste={doPaste}
-        onSplit={doSplit}
-        onDelete={doDelete}
-        onUndo={doUndo}
-        onRedo={doRedo}
-        canUndo={history.canUndo()}
-        canRedo={history.canRedo()}
-        canPaste={hasClipboard}
-        hasSelection={hasSelection}
-        onZoomIn={() => zoomBy(1.4)}
-        onZoomOut={() => zoomBy(0.71)}
-        onFit={fitView}
-        onAddTrack={addTrack}
-        onDetectTempo={doDetectTempo}
-        onDetectChords={doDetectChords}
-        onStats={doStats}
-        analyzing={analyzing}
-        chordCount={chords.length}
-        toolsOpen={toolsOpen}
-        onToggleTools={() => setToolsOpen((v) => !v)}
-      />
+        </>
+      ) : (
+        <>
+          <div className="editor-transport">
+            {transportGroup}
+            {metronomeGroup}
+            <div className="tp-group tp-right">
+              {importBtn}
+              {exportBtn}
+              {saveBtn}
+            </div>
+          </div>
+          {toolbarNode}
+        </>
+      )}
 
       {/* Audio I/O bar is desktop-only; on mobile the mic lives in Options and
           recording requests permission on demand. */}

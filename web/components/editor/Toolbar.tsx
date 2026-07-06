@@ -37,6 +37,8 @@ export interface ToolbarProps {
   onZoomOut: () => void;
   onFit: () => void;
   onAddTrack: () => void;
+  /** Hide the "Track" button — set on mobile, where it's promoted to the transport row. */
+  hideAddTrack?: boolean;
   // analyze
   onDetectTempo: () => void;
   onDetectChords: () => void;
@@ -80,25 +82,30 @@ export default function Toolbar(p: ToolbarProps) {
         </button>
       </div>
 
-      {/* View — on mobile, zoom/fit is gestural (pinch), so the buttons are hidden. */}
-      <div className="tool-group">
-        {!IS_MOBILE && (
-          <>
-            <button className="btn ghost" onClick={p.onZoomOut} title="Zoom out">
-              <ZoomOut size={15} />
+      {/* View — on mobile, zoom/fit is gestural (pinch) and "Track" is promoted to
+          the transport row, so this group can end up empty; skip it then. */}
+      {(!IS_MOBILE || !p.hideAddTrack) && (
+        <div className="tool-group">
+          {!IS_MOBILE && (
+            <>
+              <button className="btn ghost" onClick={p.onZoomOut} title="Zoom out">
+                <ZoomOut size={15} />
+              </button>
+              <button className="btn ghost" onClick={p.onFit} title="Fit all tracks to view">
+                <Maximize2 size={14} /> Fit
+              </button>
+              <button className="btn ghost" onClick={p.onZoomIn} title="Zoom in">
+                <ZoomIn size={15} />
+              </button>
+            </>
+          )}
+          {!p.hideAddTrack && (
+            <button className="btn secondary" onClick={p.onAddTrack} title="Add an empty track">
+              <ListPlus size={15} /> Track
             </button>
-            <button className="btn ghost" onClick={p.onFit} title="Fit all tracks to view">
-              <Maximize2 size={14} /> Fit
-            </button>
-            <button className="btn ghost" onClick={p.onZoomIn} title="Zoom in">
-              <ZoomIn size={15} />
-            </button>
-          </>
-        )}
-        <button className="btn secondary" onClick={p.onAddTrack} title="Add an empty track">
-          <ListPlus size={15} /> Track
-        </button>
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Analysis — desktop only (tempo/chord/stats detection). */}
       {!IS_MOBILE && (
