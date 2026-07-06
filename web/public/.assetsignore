@@ -1,0 +1,6 @@
+# Copied to out/.assetsignore by Next. Tells `wrangler deploy` (Workers Static
+# Assets) to skip files from the upload. The onnxruntime-web JSEP/WebGPU wasm is
+# ~26 MB — over Cloudflare's 25 MiB per-file limit — and is loaded from a CDN at
+# runtime instead (see lib/config.ts ORT_WASM_BASE_URL). Excluding it here keeps
+# the deploy under the limit; nothing requests the local copy.
+_next/static/media/*.wasm

@@ -8,6 +8,13 @@ import * as ort from 'onnxruntime-web';
 import { separateMixture, type StemName, type StemSet } from '@prismaxim/shared';
 import type { SeparationSession } from '@prismaxim/shared';
 import { loadModelBytes } from './model';
+import { ORT_WASM_BASE_URL } from '../config';
+
+// Load ORT's WASM runtime from a CDN rather than the bundled copy: the JSEP
+// (WebGPU) binary is ~26 MB, over Cloudflare's 25 MiB per-file limit, so it is
+// excluded from the static upload (see web/public/.assetsignore). Must be set
+// before any InferenceSession.create().
+ort.env.wasm.wasmPaths = ORT_WASM_BASE_URL;
 
 export interface RunMessage {
   type: 'run';

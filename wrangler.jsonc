@@ -1,0 +1,18 @@
+{
+  // Cloudflare Workers "Static Assets" config for the 100% static web build.
+  //
+  // Build command (set in the Workers Builds project settings):
+  //   npm run build:static -w web   → emits web/out (Next static export)
+  //
+  // `npx wrangler deploy` (the default deploy command) reads this file at the
+  // repo root and uploads web/out as an assets-only Worker (no server code).
+  // web/out/_headers carries the COOP/COEP cross-origin-isolation headers that
+  // onnxruntime-web (SharedArrayBuffer/WASM threads) + the AudioWorklet need.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // MUST match the Worker name you created in the dashboard. Rename here if yours differs.
+  "name": "prismaxim",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "./web/out"
+  }
+}

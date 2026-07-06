@@ -18,6 +18,22 @@ export const DEFAULT_BACKEND_URL =
 /** Cache Storage bucket for the downloaded model weights. */
 export const MODEL_CACHE = 'prismaxim-models-v1';
 
+/**
+ * Base URL onnxruntime-web loads its WASM runtime from (ort.env.wasm.wasmPaths).
+ * The JSEP/WebGPU wasm binary is ~26 MB — over Cloudflare's 25 MiB per-file
+ * asset limit — so it is fetched from a CDN at runtime instead of being bundled
+ * and uploaded with the static site (the bundled copy is dropped from the upload
+ * via web/public/.assetsignore). CORS + `credentialless` COEP make the
+ * cross-origin fetch work, same as smplr's samples.
+ *
+ * The version MUST match the installed onnxruntime-web (web/package.json) or the
+ * wasm and JS API will mismatch at runtime. Bump both together. Override with
+ * NEXT_PUBLIC_ORT_WASM_BASE to self-host (e.g. Cloudflare R2) — must end in `/`.
+ */
+export const ORT_WASM_BASE_URL =
+  process.env.NEXT_PUBLIC_ORT_WASM_BASE ??
+  'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/';
+
 /** Basic Pitch (audio→MIDI) TF.js model, self-hosted under public/ (same-origin). */
 export const BASIC_PITCH_MODEL_URL =
   process.env.NEXT_PUBLIC_BASIC_PITCH_MODEL_URL ?? '/models/basic-pitch/model.json';
