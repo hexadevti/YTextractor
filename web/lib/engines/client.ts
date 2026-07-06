@@ -6,9 +6,9 @@
 import {
   STEM_NAMES,
   type ProgressUpdate,
+  type SelectableStem,
   type SeparateEvent,
   type SeparateStartResponse,
-  type StemName,
   type StemSet,
 } from '@prismaxim/shared';
 import { decodeToModelAudio, stemSetFromChannels } from '../audio';
@@ -73,7 +73,7 @@ async function followJob(
 export async function separateUpload(
   baseUrl: string,
   audioBytes: ArrayBuffer,
-  meta: { title: string; ext: string; stems?: StemName[] },
+  meta: { title: string; ext: string; stems?: SelectableStem[] },
   onProgress: (p: ProgressUpdate) => void,
 ): Promise<StemSet> {
   const headers: Record<string, string> = {
@@ -97,7 +97,7 @@ export async function separateFromSource(
   baseUrl: string,
   sourceId: string,
   onProgress: (p: ProgressUpdate) => void,
-  stems?: StemName[],
+  stems?: SelectableStem[],
 ): Promise<StemSet> {
   const startRes = await fetch(`${baseUrl}/separate`, {
     method: 'POST',

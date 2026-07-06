@@ -12,7 +12,14 @@
  */
 
 import type { SeparationSession } from './runtime';
-import { orderStems, STEM_NAMES, type Stem, type StemName, type StemSet } from './stems';
+import {
+  REMAINING_STEM,
+  STEM_NAMES,
+  type SelectableStem,
+  type Stem,
+  type StemName,
+  type StemSet,
+} from './stems';
 
 export const MODEL_SAMPLE_RATE = 44100;
 export const MODEL_CHANNELS = 2;
@@ -35,6 +42,15 @@ export interface SeparationOptions {
    * only what the user asked for.
    */
   include?: readonly StemName[];
+  /**
+   * Also emit a single "remaining" track summing every source NOT in `include`
+   * (e.g. include `['vocals']` + remaining → a vocals track and one
+   * accompaniment track of drums+bass+other+guitar+piano). When set, an empty
+   * `include` means "no individual stems" (remaining = the whole mixture) rather
+   * than the usual "all 6" default. If every source is picked individually the
+   * remaining track would be silent, so it is skipped.
+   */
+  remaining?: boolean;
 }
 
 /** Triangular window used to cross-fade overlapping segments (peak in centre). */
@@ -95,20 +111,52 @@ export async function separateMixture(
   const weights = triangularWeights(segLen);
   const numSources = STEM_NAMES.length;
 
-  // Which of the 6 sources to keep, as model-output indices in canonical order.
-  // The inference below still computes all 6 (the model can't emit fewer); we
-  // simply don't allocate/accumulate the ones the caller didn't ask for.
-  const wanted = orderStems(opts.include);
-  const selected = STEM_NAMES.map((_, s) => s).filter((s) => wanted.includes(STEM_NAMES[s]!));
+  // Resolve which individual stems to emit and whether to also emit a single
+  // "remaining" track summing every source the caller did NOT pick. `include`
+  // normally defaults to "all 6" when absent/empty, but when a remaining bucket
+  // is requested an empty individual list is meaningful (leftover = the whole
+  // mixture), so we must not expand it in that case.
+  const emitRemaining = !!opts.remaining;
+  const wanted: StemName[] =
+    opts.include && opts.include.length
+      ? STEM_NAMES.filter((n) => opts.include!.includes(n))
+      : emitRemaining
+        ? []
+        : [...STEM_NAMES];
 
-  // Accumulators for weighted overlap-add: out[source][channel] and summed
-  // weights. Only selected sources get buffers (others stay null and are skipped).
-  const out: (Float32Array[] | null)[] = new Array(numSources).fill(null);
-  for (const s of selected) {
+  // Output buffers ("targets"), in emission order: each selected stem first,
+  // then the summed remaining bucket (if any). The inference below still
+  // computes all 6 sources (the model can't emit fewer); `sourceTarget[s]` maps
+  // model-output source s to the target buffer it accumulates into, or -1 to
+  // skip it entirely. Sources that share the remaining target sum together.
+  const makeBuffers = (): Float32Array[] => {
     const perChannel: Float32Array[] = [];
     for (let ch = 0; ch < numChannels; ch++) perChannel.push(new Float32Array(total));
-    out[s] = perChannel;
+    return perChannel;
+  };
+  const targets: { name: SelectableStem; channels: Float32Array[] }[] = [];
+  const sourceTarget = new Int32Array(numSources).fill(-1);
+
+  for (let s = 0; s < numSources; s++) {
+    if (!wanted.includes(STEM_NAMES[s]!)) continue;
+    sourceTarget[s] = targets.length;
+    targets.push({ name: STEM_NAMES[s]!, channels: makeBuffers() });
   }
+
+  if (emitRemaining) {
+    const leftover: number[] = [];
+    for (let s = 0; s < numSources; s++) {
+      if (!wanted.includes(STEM_NAMES[s]!)) leftover.push(s);
+    }
+    // Nothing left over (every source was picked individually) → skip it rather
+    // than emit a silent track.
+    if (leftover.length) {
+      const idx = targets.length;
+      targets.push({ name: REMAINING_STEM, channels: makeBuffers() });
+      for (const s of leftover) sourceTarget[s] = idx;
+    }
+  }
+
   const weightSum = new Float32Array(total);
 
   // Normalise the mixture (undo per-source after inference).
@@ -135,14 +183,17 @@ export async function separateMixture(
     const o = result.data; // [1, sources, channels, segLen] row-major
     const srcStride = numChannels * segLen;
 
-    for (const s of selected) {
-      const perChannel = out[s]!;
+    for (let s = 0; s < numSources; s++) {
+      const t = sourceTarget[s]!;
+      if (t < 0) continue;
+      const perChannel = targets[t]!.channels;
       for (let ch = 0; ch < numChannels; ch++) {
         const acc = perChannel[ch]!;
         const base = s * srcStride + ch * segLen;
         for (let i = 0; i < valid; i++) {
           const weight = weights[i]!;
-          // de-normalise back to original scale
+          // de-normalise back to original scale (sources mapped to the same
+          // remaining target accumulate into one buffer, summing them)
           acc[start + i]! += (o[base + i]! * std + mean) * weight;
         }
       }
@@ -155,17 +206,13 @@ export async function separateMixture(
   // Divide by accumulated weights to finish the overlap-add.
   for (let i = 0; i < total; i++) {
     const denom = weightSum[i]! || 1;
-    for (const s of selected) {
-      const perChannel = out[s]!;
-      for (let ch = 0; ch < numChannels; ch++) perChannel[ch]![i]! /= denom;
+    for (const target of targets) {
+      for (let ch = 0; ch < numChannels; ch++) target.channels[ch]![i]! /= denom;
     }
   }
 
-  // Emit only the selected stems, in canonical STEM_NAMES order.
-  const stems: Stem[] = selected.map((s) => ({
-    name: STEM_NAMES[s]!,
-    channels: out[s]!,
-  }));
+  // Emit the selected stems (canonical order) followed by the remaining bucket.
+  const stems: Stem[] = targets.map((t) => ({ name: t.name, channels: t.channels }));
 
   return { sampleRate: sr, length: total, numChannels, stems };
 }
@@ -176,8 +223,8 @@ export async function separateMixture(
  */
 export function sumStems(
   set: StemSet,
-  includeNames: StemName[],
-  gains?: Partial<Record<StemName, number>>,
+  includeNames: SelectableStem[],
+  gains?: Partial<Record<SelectableStem, number>>,
 ): Float32Array[] {
   const mix: Float32Array[] = [];
   for (let ch = 0; ch < set.numChannels; ch++) mix.push(new Float32Array(set.length));

@@ -1,6 +1,6 @@
 {
   "name": "prismaxim",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "Extract audio from YouTube (or a file), separate it into stems with Demucs, and remix in a studio-style browser mixer. Separation and YouTube extraction run in the browser or on an optional Node backend.",
   "workspaces": [

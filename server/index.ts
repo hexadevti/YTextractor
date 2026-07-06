@@ -17,13 +17,14 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import {
-  orderStems,
-  parseStemList,
+  orderSelection,
+  parseStemSelection,
   separateMixture,
+  splitStemSelection,
   STEM_NAMES,
+  type SelectableStem,
   type SeparateEvent,
   type SeparationSession,
-  type StemName,
   type StemSet,
 } from '@prismaxim/shared';
 import { BODY_LIMIT, HOST, PORT, WEB_DIR } from './config';
@@ -78,7 +79,7 @@ function getSession(): Promise<SeparationSession> {
 async function runSeparation(
   job: Job,
   audio: Buffer,
-  meta: { title: string; sourceId?: string; stems?: StemName[] },
+  meta: { title: string; sourceId?: string; stems?: SelectableStem[] },
 ) {
   try {
     setState(job, { phase: 'extracting', percent: 100, message: 'Decoding audio…' });
@@ -93,9 +94,11 @@ async function runSeparation(
     // Overlap trades speed for a smoother segment cross-fade. 0.1 is ~15% fewer
     // windows than Demucs' 0.25 default, with negligible audible difference.
     const overlap = Math.min(Math.max(Number(process.env.SEPARATION_OVERLAP ?? 0.1), 0), 0.9);
+    const { include, remaining } = splitStemSelection(meta.stems);
     const set = await separateMixture(pcm.channels, session, {
       overlap,
-      include: meta.stems,
+      include,
+      remaining,
       onProgress: (f) =>
         setState(job, { phase: 'separating', percent: Math.round(f * 100), engine }),
     });
@@ -271,7 +274,7 @@ async function main() {
       sampleRate: number;
       numChannels: number;
       lengthSamples: number;
-      stems: StemName[];
+      stems: SelectableStem[];
     }>(req.body);
     if (!body?.title) return reply.code(400).send('Missing project meta');
     const project = await createProjectShell({
@@ -280,7 +283,7 @@ async function main() {
       sampleRate: body.sampleRate,
       numChannels: body.numChannels,
       lengthSamples: body.lengthSamples,
-      stems: body.stems ?? (STEM_NAMES as unknown as StemName[]),
+      stems: body.stems ?? [...STEM_NAMES],
     });
     return reply.send(project);
   });
@@ -347,8 +350,9 @@ async function main() {
     let title = 'audio';
     let sourceId: string | undefined;
     // Optional stem selection: JSON body `stems` (source) or `X-Stems` header
-    // (upload). orderStems() normalises/validates; empty means all 6.
-    let stems: StemName[] = [...orderStems()];
+    // (upload). Real source names plus an optional `remaining` sentinel; absent
+    // means all 6 individual stems.
+    let stems: SelectableStem[] = [...STEM_NAMES];
 
     if (ct.includes('application/json')) {
       const body = parseJson<{ sourceId: string; stems?: string[] }>(req.body);
@@ -359,7 +363,7 @@ async function main() {
       audio = bytes;
       sourceId = body.sourceId;
       title = src?.meta.title ?? 'audio';
-      stems = orderStems(body.stems);
+      if (body.stems && body.stems.length) stems = orderSelection(body.stems);
     } else {
       audio = req.body as Buffer;
       if (!audio || audio.length === 0) return reply.code(400).send('Empty audio body');
@@ -368,7 +372,8 @@ async function main() {
         (req.headers['x-title'] as string) || 'Uploaded audio',
       );
       const ext = ((req.headers['x-ext'] as string) || 'audio').toLowerCase();
-      stems = parseStemList(req.headers['x-stems'] as string | undefined);
+      const hdr = req.headers['x-stems'] as string | undefined;
+      if (hdr) stems = parseStemSelection(hdr);
       const src = await saveSource({
         bytes: audio,
         title: uploadTitle,
@@ -422,7 +427,7 @@ async function main() {
   });
 
   app.get('/separate/:id/stems/:name', async (req, reply) => {
-    const { id, name } = req.params as { id: string; name: StemName };
+    const { id, name } = req.params as { id: string; name: SelectableStem };
     const job = jobs.get(id);
     if (!job?.stems) return reply.code(404).send('Stems not ready');
     const stem = job.stems.stems.find((s) => s.name === name);

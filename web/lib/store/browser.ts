@@ -16,8 +16,8 @@ import {
   type ArrangementSummary,
   type ProgressUpdate,
   type ProjectMeta,
+  type SelectableStem,
   type SourceMeta,
-  type StemName,
   type StemSet,
 } from '@prismaxim/shared';
 import { decodeToModelAudio, stemSetFromChannels } from '../audio';
@@ -255,7 +255,7 @@ export const browserStore: LibraryStore = {
   },
 
   async loadProject(project, onProgress) {
-    const names = project.stems.length ? project.stems : (STEM_NAMES as unknown as StemName[]);
+    const names = project.stems.length ? project.stems : (STEM_NAMES as unknown as SelectableStem[]);
     const perStemChannels: Float32Array[][] = [];
     for (let i = 0; i < names.length; i++) {
       const name = names[i]!;

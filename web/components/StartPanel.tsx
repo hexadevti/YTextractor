@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { ExtractionEngine, JobConfig, SeparationEngine, StemName } from '@prismaxim/shared';
+import type { ExtractionEngine, JobConfig, SeparationEngine, SelectableStem } from '@prismaxim/shared';
 import { checkBackend } from '@/lib/engines/client';
 import { IS_DESKTOP, IS_MOBILE } from '@/lib/env';
 import { cloudConfigured } from '@/lib/cloudConfig';
@@ -60,10 +60,11 @@ export default function StartPanel({ onStart, backendUrl, canAddToProject }: Sta
   const [useCloud, setUseCloud] = useState(IS_MOBILE);
   // Low-RAM mobile devices can run out of memory decoding a long 6-stem track.
   const [lowMemory, setLowMemory] = useState(false);
-  // Which of the 6 stems to produce. Default: none — the track loads unseparated
-  // and the user opts into the stems they want. Selecting fewer cuts memory,
-  // encoding and (on cloud/backend) download — the model still runs one full pass.
-  const [stems, setStems] = useState<StemName[]>([]);
+  // Which stems to produce — real sources plus an optional "remaining" bucket.
+  // Default: none — the track loads unseparated and the user opts into the stems
+  // they want. Selecting fewer cuts memory, encoding and (on cloud/backend)
+  // download — the model still runs one full pass.
+  const [stems, setStems] = useState<SelectableStem[]>([]);
   // Import into a fresh project (replace) or add to the one already open.
   const [importMode, setImportMode] = useState<ImportMode>('new');
 

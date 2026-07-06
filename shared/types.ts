@@ -1,6 +1,6 @@
 /** Shared DTOs for engine selection, job configuration, and progress reporting. */
 
-import type { StemName } from './stems';
+import type { SelectableStem } from './stems';
 
 export type ExtractionEngine = 'browser' | 'backend';
 /**
@@ -19,11 +19,13 @@ export interface JobConfig {
   /** Base URL of the optional Node backend, e.g. http://localhost:8787 */
   backendBaseUrl: string;
   /**
-   * Which stems to produce (subset of the 6). Absent/empty means all 6.
-   * Threaded to every engine (browser / backend / cloud); see
-   * SeparationOptions.include for how it maps onto the model output.
+   * Which stems to produce. Real source names (subset of the 6) plus an optional
+   * `remaining` sentinel that adds one track summing the sources not picked
+   * individually. Absent/empty means all 6. Threaded to every engine (browser /
+   * backend / cloud); see SeparationOptions.include / .remaining for how it maps
+   * onto the model output.
    */
-  stems?: StemName[];
+  stems?: SelectableStem[];
 }
 
 export type JobPhase =
@@ -57,7 +59,7 @@ export interface SeparateEvent {
   message?: string;
   engine?: string;
   /** present when phase === 'ready': stem names available for download */
-  stems?: StemName[];
+  stems?: SelectableStem[];
   /** audio metadata for the ready stems */
   sampleRate?: number;
   /** present when phase === 'ready' and the project was persisted */
@@ -115,7 +117,7 @@ export interface ProjectMeta {
   sampleRate: number;
   numChannels: number;
   lengthSamples: number;
-  stems: StemName[];
+  stems: SelectableStem[];
   engine: string;
   /** How long the stem separation took, in ms. */
   separationMs?: number;

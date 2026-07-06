@@ -11,8 +11,8 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ProjectMeta, SourceMeta, StemName, StemSet } from '@prismaxim/shared';
-import { STEM_NAMES } from '@prismaxim/shared';
+import type { ProjectMeta, SelectableStem, SourceMeta, StemSet } from '@prismaxim/shared';
+import { isStemName, REMAINING_STEM } from '@prismaxim/shared';
 import { LIBRARY_DIR } from './config';
 import { encodeWav } from './decode';
 
@@ -153,7 +153,7 @@ export async function saveProject(
 
 /** Persist a project from raw per-stem WAV files (browser-separated uploads). */
 export async function saveProjectFromWavs(
-  stems: { name: StemName; wav: Buffer }[],
+  stems: { name: SelectableStem; wav: Buffer }[],
   meta: { title: string; engine: string; sampleRate: number; numChannels: number; lengthSamples: number },
 ): Promise<ProjectMeta> {
   await ensureDirs();
@@ -168,7 +168,8 @@ export async function saveProjectFromWavs(
     sampleRate: meta.sampleRate,
     numChannels: meta.numChannels,
     lengthSamples: meta.lengthSamples,
-    stems: stems.map((s) => s.name).filter((n): n is StemName => STEM_NAMES.includes(n)),
+    // Keep valid source names and the synthetic remaining bucket.
+    stems: stems.map((s) => s.name).filter((n) => isStemName(n) || n === REMAINING_STEM),
     engine: meta.engine,
   };
   await writeFile(join(dir, 'meta.json'), JSON.stringify(projectMeta, null, 2));
@@ -182,7 +183,7 @@ export async function createProjectShell(meta: {
   sampleRate: number;
   numChannels: number;
   lengthSamples: number;
-  stems: StemName[];
+  stems: SelectableStem[];
 }): Promise<ProjectMeta> {
   await ensureDirs();
   const id = randomUUID();

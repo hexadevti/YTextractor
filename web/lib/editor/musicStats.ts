@@ -6,7 +6,7 @@
  * enough for relative comparison, not broadcast measurement.
  */
 
-import type { StemName } from '@prismaxim/shared';
+import type { SelectableStem } from '@prismaxim/shared';
 import { detectKey, detectTempo, tempoStability, toMono } from './analyze';
 import { renderProject } from './export';
 import { totalDuration, type EditorProject, type EditorTrack } from './model';
@@ -22,7 +22,7 @@ export interface MusicStats {
   dynamicLabel: string;
   tempoStability: number;
   stabilityLabel: string;
-  stems: { name: StemName; presence: number }[];
+  stems: { name: SelectableStem; presence: number }[];
 }
 
 function levels(mono: Float32Array): { rmsDb: number; peakDb: number } {
@@ -69,7 +69,7 @@ export async function computeMusicStats(project: EditorProject): Promise<MusicSt
   const stabilityLabel = stab >= 90 ? 'Very Stable' : stab >= 70 ? 'Stable' : 'Variable';
 
   const stemTracks = project.tracks.filter((t) => !!t.stem);
-  const rmsList = stemTracks.map((t) => ({ name: t.stem as StemName, rms: trackRms(t) }));
+  const rmsList = stemTracks.map((t) => ({ name: t.stem as SelectableStem, rms: trackRms(t) }));
   const maxRms = Math.max(1e-9, ...rmsList.map((s) => s.rms));
   const stems = rmsList.map((s) => ({
     name: s.name,

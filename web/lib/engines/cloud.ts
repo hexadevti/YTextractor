@@ -7,7 +7,7 @@
  * Framed body:  repeat N×  [nameLen u32le][name utf8][dataLen u32le][flac bytes]
  */
 
-import type { ProgressUpdate, StemName, StemSet } from '@prismaxim/shared';
+import type { ProgressUpdate, SelectableStem, StemSet } from '@prismaxim/shared';
 import { decodeToModelAudio } from '../audio';
 
 export async function checkCloud(baseUrl: string): Promise<boolean> {
@@ -82,7 +82,7 @@ export async function separateOnCloud(
   token: string,
   audioBytes: ArrayBuffer,
   onProgress: (p: ProgressUpdate) => void,
-  include?: StemName[],
+  include?: SelectableStem[],
 ): Promise<StemSet> {
   const url = `${baseUrl.replace(/\/$/, '')}/separate`;
   onProgress({ phase: 'separating', percent: 0, message: 'Separating on cloud…', engine: 'cloud' });
@@ -113,7 +113,7 @@ export async function separateOnCloud(
       engine: 'cloud',
     });
     const decoded = await decodeToModelAudio(f.flac);
-    stems.push({ name: f.name as StemName, channels: decoded.channels });
+    stems.push({ name: f.name as SelectableStem, channels: decoded.channels });
   }
 
   const first = stems[0]!;

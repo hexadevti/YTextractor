@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { STEM_META } from '@prismaxim/shared';
-import type { ArrangementSummary, ProjectMeta, SourceMeta, StemName, StemSet } from '@prismaxim/shared';
+import type {
+  ArrangementSummary,
+  ProjectMeta,
+  SelectableStem,
+  SourceMeta,
+  StemSet,
+} from '@prismaxim/shared';
 import { store } from '@/lib/store';
 import { cloudConfigured } from '@/lib/cloudConfig';
 import { downloadBlob, encodeWav, renderProject } from '@/lib/editor/export';
@@ -133,7 +139,7 @@ function DownloadButton({ title, run }: { title: string; run: () => Promise<void
  */
 function ProjectDownloadMenu({ project }: { project: ProjectMeta }) {
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<'mix' | StemName | null>(null);
+  const [busy, setBusy] = useState<'mix' | SelectableStem | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const setRef = useRef<StemSet | null>(null);
 
@@ -151,7 +157,7 @@ function ProjectDownloadMenu({ project }: { project: ProjectMeta }) {
     return setRef.current;
   };
 
-  const dl = async (key: 'mix' | StemName) => {
+  const dl = async (key: 'mix' | SelectableStem) => {
     setBusy(key);
     try {
       const set = await ensureSet();
@@ -198,7 +204,7 @@ function ProjectDownloadMenu({ project }: { project: ProjectMeta }) {
 
 export interface LibraryPanelProps {
   onOpenProject: (project: ProjectMeta) => void;
-  onSplitSource: (source: SourceMeta, useCloud: boolean, stems: StemName[]) => void;
+  onSplitSource: (source: SourceMeta, useCloud: boolean, stems: SelectableStem[]) => void;
   onOpenArrangement: (arr: ArrangementSummary) => void;
   reloadKey?: number;
 }
@@ -218,7 +224,7 @@ export default function LibraryPanel({
   const [useCloud, setUseCloud] = useState(false);
   // Which stems a re-split produces (shared across the sources below). Default:
   // none — the source loads unseparated unless the user picks stems.
-  const [stems, setStems] = useState<StemName[]>([]);
+  const [stems, setStems] = useState<SelectableStem[]>([]);
 
   useEffect(() => {
     setHasCloud(cloudConfigured());

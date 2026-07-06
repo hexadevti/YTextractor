@@ -4,7 +4,7 @@
  * and referenced by id from each clip, so splits/copies don't duplicate audio.
  */
 
-import type { ArrangementSummary, ProgressUpdate, StemName } from '@prismaxim/shared';
+import type { ArrangementSummary, ProgressUpdate, SelectableStem } from '@prismaxim/shared';
 import { decodeToModelAudio } from '../audio';
 import { encodeWav } from '../mixer/export';
 import { makeAudioBuffer, uid, type EditorProject, type MidiNote } from './model';
@@ -21,7 +21,7 @@ interface PersistTrack {
   id: string;
   name: string;
   color: string;
-  stem?: StemName;
+  stem?: SelectableStem;
   muted: boolean;
   soloed: boolean;
   volume: number;

@@ -22,6 +22,80 @@ export async function renderTrack(
   });
 }
 
+/** Decoded audio in the layout the Demucs model expects (44.1 kHz stereo). */
+export interface ModelAudio {
+  channels: Float32Array[];
+  sampleRate: number;
+  length: number;
+}
+
+/**
+ * Render a time region [startSec, endSec] of the given audio tracks into a
+ * 44.1 kHz stereo mixdown — the exact input the stem-separation model expects.
+ * Used by the editor's "separate selection into stems" action: the region is
+ * sliced out and resampled in one offline pass (the picked tracks are mixed at
+ * unity gain, ignoring their mute/solo/volume, so the selection separates
+ * whatever audio it covers). MIDI tracks carry no audio and are skipped.
+ */
+export async function renderRegionToModelAudio(
+  project: EditorProject,
+  trackIds: string[],
+  startSec: number,
+  endSec: number,
+): Promise<ModelAudio> {
+  const SR = 44100;
+  const CH = 2;
+  const dur = Math.max(1 / SR, endSec - startSec);
+  const frames = Math.max(1, Math.ceil(dur * SR));
+  const offline = new OfflineAudioContext(CH, frames, SR);
+  const master = offline.createGain();
+  master.connect(offline.destination);
+
+  const include = new Set(trackIds);
+  for (const track of project.tracks) {
+    if (!include.has(track.id) || track.midi) continue;
+    for (const clip of track.clips) {
+      const cs = clip.startSec;
+      const ce = clipEnd(clip);
+      if (ce <= startSec || cs >= endSec) continue; // no overlap with the region
+      // Clamp the clip to the region and shift it so the region begins at t=0.
+      const playStart = Math.max(cs, startSec);
+      const playEnd = Math.min(ce, endSec);
+      const when = playStart - startSec;
+      const offsetIntoBuffer = clip.offsetSec + (playStart - cs);
+      const playDur = playEnd - playStart;
+      const src = offline.createBufferSource();
+      src.buffer = clip.buffer;
+      src.connect(master);
+      try {
+        src.start(when, offsetIntoBuffer, playDur);
+      } catch {
+        /* out-of-range clip; skip */
+      }
+    }
+  }
+
+  const buf = await offline.startRendering();
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < CH; c++) {
+    const srcCh = c < buf.numberOfChannels ? c : 0;
+    channels.push(Float32Array.from(buf.getChannelData(srcCh)));
+  }
+  return { channels, sampleRate: SR, length: buf.length };
+}
+
+/** Peak absolute sample across channels — used to detect a silent region. */
+export function peakLevel(channels: Float32Array[]): number {
+  let peak = 0;
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) {
+      const a = Math.abs(ch[i]!);
+      if (a > peak) peak = a;
+    }
+  }
+  return peak;
+}
+
 /** Render the arrangement (clip positions, trims, gains) to a single buffer. */
 export async function renderProject(project: EditorProject): Promise<AudioBuffer> {
   const sr = project.sampleRate;
